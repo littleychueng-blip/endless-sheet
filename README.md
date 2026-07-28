@@ -1,91 +1,56 @@
-# Endless Sheet — Coolify deploy
+# Endless Sheet
 
-A single static page. No build step, no runtime dependencies, no external
-requests — the icon, the manifest, every sound and sprite is generated or
-embedded in `index.html`.
+Infinite bubble wrap — tap, drag, or drive a little character over it. Six
+synthesised sound materials, wandering NPCs, levels, generative ambient music.
+
+Live: http://no9k2hqgkxidx8rzwfn8mdb3.35.202.38.29.sslip.io/
+
+## Layout
 
 ```
-index.html    the app (~225 KB)
-Dockerfile    nginx:alpine, serves index.html on port 80
-nginx.conf    gzip + no-cache on the entry file
+src/app.html   the app — this is the file you edit
+icon.png       home-screen icon, 192x192
+build.py       wraps src/app.html + icon.png into index.html
+index.html     built output (committed — the image copies it)
+Dockerfile     nginx:alpine, serves index.html on port 80
+nginx.conf     gzip + no-cache on the entry file
 ```
 
----
+`index.html` is generated. **Never edit it by hand** — edit `src/app.html`
+and rebuild, or the next build silently discards your changes.
 
-## 1. Put it in a Git repo
+## Changing something
 
 ```bash
-cd endless-sheet-deploy
-git init -b main
-git add .
-git commit -m "Endless Sheet"
-git remote add origin <your-repo-url>
-git push -u origin main
+# edit src/app.html, then
+python3 build.py
+git commit -am "what changed"
+git push
 ```
 
-A private repo is fine — connect it in Coolify with the GitHub App or a
-deploy key. A public repo needs no credentials at all.
+Coolify sees the push and redeploys on its own. About 30 seconds from `git
+push` to the new version being live. `nginx.conf` sends `no-cache` on the
+entry file, so a reload picks it up rather than serving a pinned copy.
 
-## 2. Point DNS at the server first
+## Where it runs
 
-Add an `A` record for the hostname you want (e.g. `sheet.example.com`)
-pointing at your Coolify server's IP, and let it resolve **before** step 3.
-Coolify asks Let's Encrypt for the certificate the moment you save the
-domain; if DNS isn't live yet the request fails and you'll be chasing a
-retry.
+Google Cloud VM, Coolify v4, project `endless-sheet` / production. Build pack
+is Dockerfile, ports exposes 80, and Traefik routes the sslip.io domain to the
+container.
 
-## 3. Create the application in Coolify
+The domain is plain **http**. Let's Encrypt rate-limits `sslip.io` hard enough
+that certificate validation fails, so HTTPS needs a real domain: point an A
+record at `35.202.38.29`, set it as the domain in Coolify, and a certificate
+is issued automatically. Adding to the home screen still gives a fullscreen
+app over http — that comes from the meta tags, not the protocol.
 
-1. **Project → + New → Application**
-2. Source: **Public Repository** (paste the URL) or your connected GitHub account
-3. Branch: `main`
-4. **Build Pack: `Dockerfile`**
-5. **Ports Exposes: `80`**
-6. **Domains:** `https://sheet.example.com` — with the `https://` prefix;
-   Coolify's proxy terminates TLS and issues the certificate itself
-7. **Deploy**
+## No external requests
 
-First build pulls `nginx:alpine` and copies one file — it takes seconds.
+Every sound is synthesised in Web Audio at the moment it plays, every sprite
+is drawn on a canvas, and the icon and manifest are inlined as data URIs.
+Once the page loads, it talks to nothing.
 
-### Alternative: no Dockerfile
+## Progress is per-origin
 
-Coolify's **Static** build pack serves a directory with its own nginx:
-
-- Build Pack: `Static`
-- Publish Directory: `/`
-- Ports Exposes: `80`
-
-Same result. You lose the gzip and cache headers from `nginx.conf`, which
-for one file is a minor thing. Use the Dockerfile route if you want them.
-
-### Alternative: no Git at all
-
-Create a **Docker Compose** resource using `nginx:alpine`, then
-**Storages → Add File Mount** with the destination
-`/usr/share/nginx/html/index.html` and paste the file contents in.
-It works, but pasting 225 KB into a browser textarea is unpleasant — only
-worth it if you can't use a repo.
-
-## 4. Put it on your phone
-
-Open the `https://` URL in **Safari** (iOS) or Chrome (Android) →
-**Share → Add to Home Screen**. It launches fullscreen with no browser
-chrome and its own icon.
-
-- Add to Home Screen exists only in Safari on iOS, not Chrome for iOS.
-- It must be `https`. That's the whole reason for step 2.
-- Web Audio obeys the physical silent switch on iPhone — if it looks like
-  it's popping but you hear nothing, flip the ringer switch.
-
-## Updating later
-
-Edit `index.html`, commit, push. With **Auto Deploy** enabled Coolify
-rebuilds on the webhook; otherwise hit **Redeploy**. `nginx.conf` sends
-`no-cache` on the entry file, so a reload picks up the new version rather
-than serving a pinned copy.
-
-## Where your progress lives
-
-Level, XP, wardrobe, and settings sit in `localStorage`, keyed to the
-origin. The copy on your own domain keeps its own save, separate from the
-one hosted on claude.ai. Pick one home and stay with it.
+Level, XP, wardrobe and settings live in `localStorage`, keyed to the origin.
+A copy served from a different hostname keeps its own separate save.
