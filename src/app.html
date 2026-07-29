@@ -301,6 +301,90 @@
 
   .sep { height: 1px; margin: 1px 0; border: 0; background: var(--hairline); }
 
+  /* ── who's here ───────────────────────────────────────── */
+  #online {
+    font-size: 9px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #online .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted);
+  }
+  #online.live .dot { background: #4ED07E; }
+  #online.live b { color: var(--ink); font-weight: 600; }
+  #online.bad .dot { background: #E0704F; }
+
+  /* ── join screen ──────────────────────────────────────── */
+  #join {
+    position: fixed;
+    inset: 0;
+    z-index: 6;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: color-mix(in oklab, var(--ground) 88%, transparent);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    transition: opacity 340ms ease;
+  }
+  #join.gone { opacity: 0; pointer-events: none; }
+  #join[hidden] { display: none; }
+
+  #joinform {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: min(320px, 100%);
+    padding: 26px 24px;
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+  }
+  #joinform h1 {
+    margin: 0 0 2px;
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    color: var(--ink);
+  }
+  #joinform label {
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #who {
+    padding: 11px 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+    font-size: 16px;              /* 16px stops iOS zooming the page on focus */
+  }
+  #who:focus { outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent); outline-offset: 1px; }
+  #go {
+    padding: 12px 16px;
+    border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--accent) 24%, var(--surface-2));
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  #go:hover { background: color-mix(in oklab, var(--accent) 34%, var(--surface-2)); }
+  #joinnote { margin: 0; font-size: 10px; line-height: 1.5; color: var(--muted); }
+
   /* ── level-up toast ───────────────────────────────────── */
   #toast {
     position: fixed;
@@ -570,6 +654,7 @@
     <div id="bar"><i id="barfill"></i></div>
     <span id="xp" class="mono">0 / 1000</span>
   </div>
+  <div id="online" class="mono"><i class="dot"></i><span id="onlineN">offline</span></div>
 </div>
 
 <div id="controls">
@@ -626,6 +711,17 @@
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
+
+<div id="join">
+  <form id="joinform">
+    <h1 class="mono">Endless Sheet</h1>
+    <label for="who" class="mono">Your name</label>
+    <input id="who" type="text" maxlength="14" autocomplete="off" autocapitalize="off"
+           spellcheck="false" placeholder="e.g. Lyc" required>
+    <button id="go" type="submit" class="mono">Play</button>
+    <p id="joinnote" class="mono">Anyone with the link joins the same world.</p>
+  </form>
+</div>
 
 <div id="stick" aria-hidden="true"><div id="knob"></div></div>
 
@@ -1592,6 +1688,7 @@
     slapCharge = 0;
     store.set("slap", 0);
     paintSlap();
+    try { net.ws && net.ws.readyState === 1 && net.ws.send(JSON.stringify({ t: "slap" })); } catch (e) {}
     if (reduced) { slapLand(); slapFx = null; return; }   // no theatrics, just the result
     slapFx.hit = false;
   }
@@ -1715,7 +1812,175 @@
     drawPalm(slapFx.x, slapFx.y - H * 1.3 * p * p, 1 - p * 0.2, (1 - p) * 0.95);
   }
 
+  /* ══ multiplayer ═════════════════════════════════════════
+     A relay, not a server: it stores nothing and decides nothing.
+     Everyone sends where they are ~12 times a second and draws whoever
+     else is in the room. Positions travel as (zone, fraction across,
+     fraction down) so two players on different screen sizes — whose cell
+     grids genuinely differ — still stand in the same place relative to the
+     world. Cells stay local; only people are shared. */
+
+  const ROOM = "friends";
+  const SEND_HZ = 12;
+  const DEFAULT_RELAY = "";                  // set to the Worker's wss:// URL once deployed
+
+  // ?relay=wss://… overrides and sticks, so the address can change without a rebuild
+  const relayParam = new URLSearchParams(location.search).get("relay");
+  if (relayParam !== null) store.set("relay", relayParam);
+  const RELAY = (relayParam !== null ? relayParam : store.get("relay", DEFAULT_RELAY)).trim();
+
+  const net = { ws: null, id: null, name: "", peers: new Map(), sendAt: 0, state: "off" };
+
+  const netSpan = () => zoneW + bridgeW;
+
+  function paintOnline() {
+    const el = document.getElementById("online");
+    const n = document.getElementById("onlineN");
+    if (!el || !n) return;
+    const here = net.peers.size + 1;
+    const live = net.state === "on";
+    el.classList.toggle("live", live);
+    el.classList.toggle("bad", net.state === "error" || net.state === "full");
+    n.innerHTML =
+      net.state === "on" ? "<b>" + here + "</b> here"
+      : net.state === "connecting" ? "connecting…"
+      : net.state === "full" ? "room full"
+      : net.state === "error" ? "reconnecting…"
+      : "solo";
+  }
+
+  function netConnect(name) {
+    net.name = name;
+    if (!RELAY) { net.state = "solo"; paintOnline(); return; }
+    net.state = "connecting";
+    paintOnline();
+    let ws;
+    try { ws = new WebSocket(RELAY.replace(/\/+$/, "") + "/room/" + ROOM); }
+    catch (e) { net.state = "error"; paintOnline(); return; }
+    net.ws = ws;
+
+    ws.onopen = () => { net.state = "on"; paintOnline(); netSend(true); };
+    ws.onerror = () => { net.state = "error"; paintOnline(); };
+    ws.onclose = () => {
+      net.ws = null; net.peers.clear();
+      if (net.state !== "full") net.state = "error";
+      paintOnline();
+      setTimeout(() => { if (!net.ws && net.name) netConnect(net.name); }, 4000);
+    };
+    ws.onmessage = ev => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      netApply(m);
+    };
+  }
+
+  function netApply(m) {
+    if (m.t === "hello") { net.id = m.id; return; }
+    if (m.t === "full") { net.state = "full"; paintOnline(); return; }
+    if (m.t === "left") { net.peers.delete(m.id); paintOnline(); return; }
+    if (m.t === "join") { netSend(true); return; }      // re-announce so they see us
+
+    if (m.t === "s") {
+      let p = net.peers.get(m.id);
+      if (!p) {
+        p = {
+          x: 0, y: 0, z: 0, vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0, thop: 0,
+          step: Math.random() * 6, face: 1, blink: 0, nextBlink: 2200, cool: 0,
+          scale: 1, belt: true, remote: true, name: "",
+          look: { body: "auto", hat: "none", eyes: "dots" }
+        };
+        net.peers.set(m.id, p);
+        paintOnline();
+      }
+      p.name = String(m.n || "").slice(0, 14);
+      if (m.l) p.look = { body: m.l[0], hat: m.l[1], eyes: m.l[2] };
+      p.z = Math.min(PACKS.length - 1, Math.max(0, m.z | 0));
+      p.tx = zoneStart(p.z) + m.x * netSpan();          // back into this client's world
+      p.ty = m.y * H;
+      p.thop = (m.h || 0) * S;
+      p.face = m.f >= 0 ? 1 : -1;
+      p.moving = !!m.m;
+      p.seen = performance.now();
+      if (!p.placed) { p.placed = 1; p.x = p.tx; p.y = p.ty; }
+      return;
+    }
+
+    if (m.t === "slap") {                               // someone else brought the hand down
+      const p = net.peers.get(m.id);
+      if (!p) return;
+      rings.push({ x: p.x, y: p.y, t: performance.now(), life: 620, big: true });
+      if (!reduced) shake = Math.max(shake, 0.5);
+    }
+  }
+
+  function netSend(force) {
+    if (!net.ws || net.ws.readyState !== 1) return;
+    const now = performance.now();
+    if (!force && now - net.sendAt < 1000 / SEND_HZ) return;
+    net.sendAt = now;
+    const w = walker;
+    try {
+      net.ws.send(JSON.stringify({
+        t: "s",
+        n: net.name,
+        l: [look.body, look.hat, look.eyes],
+        z: zone,
+        x: (w.x - zoneStart(zone)) / netSpan(),         // relative: screen size stops mattering
+        y: w.y / H,
+        h: (w.hop || 0) / S,
+        f: w.face >= 0 ? 1 : -1,
+        m: Math.hypot(w.vx, w.vy) > S * 0.4 ? 1 : 0
+      }));
+    } catch (e) { /* the socket closes itself */ }
+  }
+
+  // remote players are critters somebody else is steering
+  function stepPeers(now, dt) {
+    for (const [id, p] of net.peers) {
+      if (now - p.seen > 12000) { net.peers.delete(id); paintOnline(); continue; }
+      const k = Math.min(1, dt * 12);
+      const ox = p.x, oy = p.y;
+      p.x += (p.tx - p.x) * k;
+      p.y += (p.ty - p.y) * k;
+      p.hop += (p.thop - p.hop) * k;
+      p.vx = dt > 0 ? (p.x - ox) / dt : 0;
+      p.vy = dt > 0 ? (p.y - oy) / dt : 0;
+      tick(p, dt, p.moving ? 1 : 0);
+    }
+  }
+
+  function drawPeerTags() {
+    if (!net.peers.size) return;
+    const fs = Math.max(9, Math.round(S * 0.2));
+    g.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    for (const [, p] of net.peers) {
+      if (!p.name || p.x < cam.x - S * 2 || p.x > cam.x + W + S * 2) continue;
+      const y = p.y + p.hop - S * 1.05;
+      const wide = g.measureText(p.name).width + fs * 1.5;
+      rr(g, p.x - wide / 2, y - fs * 0.85, wide, fs * 1.7, fs * 0.85);
+      g.fillStyle = rgba(darkNow ? "#16161E" : "#FFFFFF", 0.74);
+      g.fill();
+      g.fillStyle = rgba(darkNow ? "#ECECF4" : "#1A1A24", 0.92);
+      g.fillText(p.name, p.x, y);
+    }
+  }
+
   function collide(now) {
+    // bumping into a friend does the same thing as bumping into a wanderer
+    for (const [, p] of net.peers) {
+      const dx = p.x - walker.x, dy = p.y - walker.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      const sep = S * 0.55 * 2 * 1.5;
+      if (d > sep || p.cool > 0) continue;
+      const ux = dx / d, uy = dy / d;
+      walker.x -= ux * ((sep - d) / 2 + S * 0.3);
+      walker.y -= uy * ((sep - d) / 2 + S * 0.3);
+      walker.kx -= ux * S * 7; walker.ky -= uy * S * 7;
+      p.cool = 0.9;
+      blast((p.x + walker.x) / 2, (p.y + walker.y) / 2, now);
+    }
+
     for (const n of npcs) {
       const dx = n.x - walker.x, dy = n.y - walker.y;
       const d = Math.hypot(dx, dy) || 0.001;
@@ -1750,10 +2015,11 @@
   }
 
   function drawCritter(w) {
+    const L = w.look || look;          // remote players wear their own
     const u = S * 0.55 * w.scale;
     // the player is the opposite of the ground, so it separates from any
     // sheet; the wanderers sit in between and read as background life
-    const dressed = w.belt && BODIES[look.body];
+    const dressed = w.belt && BODIES[L.body];
     const body = !w.belt ? (darkNow ? "#9C9AB0" : "#77758A")
       : dressed || (darkNow ? "#F2F1F8" : "#22222E");
     const face = dressed ? "#1B1B26"
@@ -1812,10 +2078,10 @@
       g.restore();
     }
 
-    if (w.belt && look.hat !== "none") drawHat(u, bw, bh, w.face);
+    if (w.belt && L.hat !== "none") drawHat(u, bw, bh, w.face, L);
 
     const ex = w.face * u * 0.1, open = w.blink < 0 ? 0.16 : 1;
-    const eyes = w.belt ? look.eyes : "dots";
+    const eyes = w.belt ? L.eyes : "dots";
     g.fillStyle = face;
     g.strokeStyle = face;
     g.lineCap = "round";
@@ -1851,17 +2117,18 @@
   }
 
   // hats sit on the head, in the material's colour
-  function drawHat(u, bw, bh, dir) {
+  function drawHat(u, bw, bh, dir, L) {
+    L = L || look;
     const A = pack.accent;
     g.fillStyle = A;
     g.strokeStyle = A;
 
-    if (look.hat === "cap") {
+    if (L.hat === "cap") {
       g.beginPath(); g.arc(0, -bh * 0.5, bw * 0.94, Math.PI, 0); g.fill();
       g.beginPath();
       g.ellipse((dir >= 0 ? 1 : -1) * bw * 0.72, -bh * 0.48, bw * 0.62, u * 0.1, 0, 0, 6.2832);
       g.fill();
-    } else if (look.hat === "bow") {
+    } else if (L.hat === "bow") {
       const bx = -bw * 0.5, by = -bh * 0.86;
       for (const s of [-1, 1]) {
         g.beginPath();
@@ -1871,7 +2138,7 @@
         g.closePath(); g.fill();
       }
       g.beginPath(); g.arc(bx, by, u * 0.085, 0, 6.2832); g.fill();
-    } else if (look.hat === "crown") {
+    } else if (L.hat === "crown") {
       const cy = -bh * 0.74, cw = bw * 0.72, ch = u * 0.46;   // points must clear the head
       g.beginPath();
       g.moveTo(-cw, cy);
@@ -1882,7 +2149,7 @@
       g.lineTo(cw * 0.56, cy - ch);
       g.lineTo(cw, cy);
       g.closePath(); g.fill();
-    } else if (look.hat === "phones") {
+    } else if (L.hat === "phones") {
       g.lineWidth = u * 0.11;
       g.beginPath(); g.arc(0, -bh * 0.3, bw * 1.02, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
       for (const s of [-1, 1]) {
@@ -2034,7 +2301,9 @@
 
     if (walker.on) stepWalker(now, dt);
     for (const n of npcs) stepNpc(n, now, dt);
+    stepPeers(now, dt);
     if (walker.on) collide(now);
+    netSend(false);
 
     // the camera trails the walker down the strip
     const focus = walker.on ? walker.x : cam.x + W / 2;
@@ -2117,7 +2386,9 @@
     }
 
     for (const n of npcs) drawCritter(n);
+    for (const [, p] of net.peers) drawCritter(p);
     if (walker.on) drawCritter(walker);
+    drawPeerTags();
     drawBridgeFront();
     drawSlap(now);                            // the hand covers everything
 
@@ -2461,8 +2732,30 @@
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", buildSprites);
   new MutationObserver(buildSprites).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
+  /* ── join ───────────────────────────────────────────── */
+
+  const joinEl = document.getElementById("join");
+  const whoEl = document.getElementById("who");
+  const noteEl = document.getElementById("joinnote");
+
+  whoEl.value = store.get("name", "");
+  if (!RELAY) noteEl.textContent = "No relay configured — you'll play on your own.";
+
+  document.getElementById("joinform").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = whoEl.value.trim().slice(0, 14) || "anon";
+    store.set("name", name);
+    audio();                                 // the tap that buys us sound
+    joinEl.classList.add("gone");
+    setTimeout(() => { joinEl.hidden = true; }, 360);
+    netConnect(name);
+  });
+
+  addEventListener("beforeunload", () => { try { net.ws && net.ws.close(); } catch (e) {} });
+
   countEl.textContent = fmt(pops);
   paintXp();
+  paintOnline();
   tagEl.textContent = PACKS[0].name + " · " + PACKS[0].tag;
   layout();                                  // builds the world and dresses the UI for wherever you are
   requestAnimationFrame(frame);
