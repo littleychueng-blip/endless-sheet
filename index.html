@@ -385,6 +385,49 @@
   }
   #stick.gripped #knob { transition: background 500ms ease; }
 
+  /* ── the slap ─────────────────────────────────────────── */
+  #slap {
+    position: fixed;
+    right: 20px;
+    bottom: calc(env(safe-area-inset-bottom) + 108px);
+    z-index: 3;
+    width: 72px;
+    height: 72px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: not-allowed;
+    /* the ring is the charge meter: --p runs 0 to 1 */
+    background:
+      conic-gradient(var(--accent) calc(var(--p, 0) * 360deg), transparent 0),
+      var(--surface);
+    box-shadow: inset 0 0 0 3px var(--surface-2), var(--shadow);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    transition: transform 200ms cubic-bezier(.2,1.5,.4,1), filter 250ms ease;
+    filter: saturate(.25);
+  }
+  #slap svg { width: 30px; height: 30px; fill: var(--muted); transition: fill 250ms ease; }
+  #slap[hidden] { display: none; }
+  #slap.ready {
+    cursor: pointer;
+    filter: none;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  #slap.ready svg { fill: var(--ink); }
+  #slap.ready:hover { transform: scale(1.06); }
+  #slap.ready:active { transform: scale(.94); }
+  #slap:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: inset 0 0 0 3px var(--surface-2), var(--shadow); }
+    50%      { box-shadow: inset 0 0 0 3px var(--surface-2), 0 0 0 7px color-mix(in oklab, var(--accent) 22%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #slap.ready { animation: none; }
+  }
+
   #vol label {
     font-size: 9px;
     letter-spacing: .2em;
@@ -462,6 +505,15 @@
     color: var(--muted);
     transition: background 300ms ease, border-color 300ms ease, transform 300ms cubic-bezier(.2,1.5,.4,1);
   }
+  #map button.node {
+    padding: 0;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  #map button.node:hover { border-color: var(--c); }
+  #map button.node:focus-visible { outline: 2px solid var(--c); outline-offset: 3px; }
   #map .node.open { border-color: color-mix(in oklab, var(--c) 65%, transparent); color: transparent; }
   #map .node.here {
     border-color: var(--c);
@@ -595,6 +647,17 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <div id="stick" aria-hidden="true"><div id="knob"></div></div>
+
+<button id="slap" type="button" aria-label="Slap the whole screen">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="10.4" y="1.5" width="3.2" height="9" rx="1.6"/>
+    <rect x="6.6" y="2.8" width="3.2" height="8" rx="1.6"/>
+    <rect x="14.2" y="2.8" width="3.2" height="8" rx="1.6"/>
+    <rect x="17.6" y="5" width="3" height="6.4" rx="1.5"/>
+    <rect x="3.6" y="6.4" width="3" height="5" rx="1.5" transform="rotate(-20 5.1 8.9)"/>
+    <path d="M5.2 9.5h13.6a2 2 0 0 1 2 2v3.2a7 7 0 0 1-7 7h-3.6a7 7 0 0 1-7-7v-3.2a2 2 0 0 1 2-2z"/>
+  </svg>
+</button>
 
 <div id="tray-wrap">
   <div id="tag" class="mono">Bubble wrap &middot; Cheap plastic, sharp snap</div>
@@ -800,6 +863,20 @@
     out = master;
   }
 
+  // an open palm the size of the sky, landing flat
+  function slapSound() {
+    if (!ac) return;
+    try {
+      out = master;
+      const t = ac.currentTime + 0.001;
+      crack(t, { type: "lowpass", freq: 900, q: 0.9, gain: 1.2, knee: 0.4, d: 0.16 });   // the meat
+      tone(t, { from: 72, to: 30, sweep: 0.28, gain: 0.95, a: 0.004, d: 0.55 });         // the room
+      crack(t, { type: "bandpass", freq: 3000, q: 1.6, gain: 0.5, knee: 0.3, d: 0.05 }); // skin snap
+      burst(t + 0.03, { type: "lowpass", freq: 500, q: 1, gain: 0.35, d: 0.3 });         // rumble after
+    } catch (e) { /* silence beats a dead render loop */ }
+    out = master;
+  }
+
   // the shove when two of them collide — no pack of its own, just weight
   function boom(x) {
     if (!ac) return;
@@ -940,15 +1017,22 @@
     sky: "#4FA3E3", grape: "#9B6BD6", gum: "#EE7EB0"
   };
 
-  // the little guy who does the walking
+  // pop this many and you earn one almighty slap
+  const SLAP_AT = 500;
+  let slapCharge = Math.min(SLAP_AT, parseInt(store.get("slap", "0"), 10) || 0);
+  let slapFx = null;
+
+  // the little guy who does the walking. hop/hopV are the vertical axis —
+  // only the slap uses them, but every critter carries them
   const walker = {
     on: store.get("walk", "1") === "1",
-    x: 0, y: 0, vx: 0, vy: 0, kx: 0, ky: 0,
+    x: 0, y: 0, vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0,
     step: 0, face: 1, blink: 0, nextBlink: 1800,
     scale: 1, belt: true, cool: 0
   };
   const stick = { dx: 0, dy: 0, id: null };
   const keyVec = { x: 0, y: 0 };
+  let running = false;                       // Shift, or the stick pushed to the rim
 
   /* ══ colour helpers ══════════════════════════════════════ */
 
@@ -1280,7 +1364,11 @@
     countEl.classList.add("tick");
     setTimeout(() => countEl.classList.remove("tick"), 90);
     addXp(1);
-    if (pops % 10 === 0) { store.set("pops", pops); store.set("exp", exp); }
+    if (charging) slapCharge = Math.min(SLAP_AT, slapCharge + 1);
+    if (pops % 10 === 0) {
+      store.set("pops", pops); store.set("exp", exp); store.set("slap", slapCharge);
+      paintSlap();
+    }
     if (navigator.vibrate) navigator.vibrate(P.shape === "cap" ? 6 : 10);
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
@@ -1317,7 +1405,7 @@
     while (npcs.length < want) {
       npcs.push({
         x: 0, y: 0, z: zone,
-        vx: 0, vy: 0, kx: 0, ky: 0,
+        vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0,
         hx: 0, hy: 0, tx: 0, ty: 0, turn: 0, cool: 0,
         step: Math.random() * 6, face: 1, blink: 0, nextBlink: 1200 + Math.random() * 3400,
         scale: 0.8, belt: false
@@ -1345,6 +1433,11 @@
     const damp = Math.exp(-dt * 7);
     c.kx *= damp; c.ky *= damp;
     if (c.cool > 0) c.cool -= dt;
+    if (c.hop < 0 || c.hopV) {                 // airborne: negative hop is up
+      c.hopV += S * 26 * dt;
+      c.hop += c.hopV * dt;
+      if (c.hop >= 0) { c.hop = 0; c.hopV = 0; }
+    }
   }
 
   function trample(c, now, reach, heavy) {
@@ -1411,7 +1504,9 @@
     let mag = Math.hypot(ix, iy);
     if (mag > 1) { ix /= mag; iy /= mag; mag = 1; }
 
-    const speed = S * 3.1;
+    // Shift on a keyboard, or the stick shoved to the rim on a phone
+    const runMul = (running || Math.hypot(stick.dx, stick.dy) > 0.85) ? 2 : 1;
+    const speed = S * 3.1 * runMul;
     w.vx = ix * speed + w.kx; w.vy = iy * speed + w.ky;
     w.x += w.vx * dt; w.y += w.vy * dt;
 
@@ -1438,7 +1533,7 @@
     if (Math.abs(ix) > 0.06) w.face += ((ix > 0 ? 1 : -1) - w.face) * Math.min(1, dt * 9);
 
     const before = Math.sin(w.step);
-    tick(w, dt, mag);
+    tick(w, dt, Math.min(1.6, mag * runMul));   // legs keep up with the speed
     // a footfall is the moment the gait crosses zero — that's when it lands
     if (mag > 0.15 && before * Math.sin(w.step) <= 0) footfall(w);
 
@@ -1502,6 +1597,143 @@
     if (navigator.vibrate) navigator.vibrate([12, 24, 18]);
   }
 
+  /* ══ the slap ════════════════════════════════════════════
+     500 pops buys one. A hand comes down over the whole viewport,
+     flattens every item on screen, and throws everyone off the ground. */
+
+  const SLAP_FALL = 380, SLAP_LIFT = 420;
+
+  let charging = true;                         // the slap's own pops don't refill it
+
+  function fireSlap() {
+    if (slapFx || slapCharge < SLAP_AT) return;
+    slapFx = { t0: performance.now(), x: cam.x + W / 2, y: H * 0.52, hit: true };
+    slapCharge = 0;
+    store.set("slap", 0);
+    paintSlap();
+    if (reduced) { slapLand(); slapFx = null; return; }   // no theatrics, just the result
+    slapFx.hit = false;
+  }
+
+  // everything the camera can see, popped from the middle outward
+  function popAll(cx, cy, now) {
+    const vx0 = cam.x - S, vx1 = cam.x + W + S;
+    const near = [];
+    for (const c of cells) {
+      if (c.st !== 0 || c.x < vx0 || c.x > vx1) continue;
+      near.push([(c.x - cx) ** 2 + (c.y - cy) ** 2, c]);
+    }
+    near.sort((a, b) => a[0] - b[0]);
+    // only the closest handful get the full treatment — 300 voices would take
+    // four seconds to drain and bury the machine in particles
+    charging = false;
+    for (let i = 0; i < near.length; i++) {
+      if (i < 48) popCell(near[i][1], now);
+      else popQuiet(near[i][1], now);
+    }
+    charging = true;
+    countEl.textContent = fmt(pops);            // the quiet ones never touched it
+    store.set("pops", pops);
+    store.set("exp", exp);
+    return near.length;
+  }
+
+  function popQuiet(c, now) {
+    c.st = 1; c.t = now;
+    pops++;
+    addXp(1);
+  }
+
+  function slapLand() {
+    const now = performance.now();
+    const cx = slapFx ? slapFx.x : cam.x + W / 2;
+    const cy = slapFx ? slapFx.y : H * 0.52;
+
+    const n = popAll(cx, cy, now);
+    slapSound();
+
+    if (!reduced) {
+      shake = 1.8;
+      for (let i = 0; i < 3; i++) rings.push({ x: cx, y: cy, t: now + i * 110, life: 720, big: true });
+      flash = { x: cx, y: cy, t: now };
+      for (let i = 0; i < 30; i++) {           // dust thrown out along the ground
+        const a = Math.random() * 6.2832;
+        const sp = (1.5 + Math.random() * 4) * (S / 56);
+        parts.push({
+          x: cx + (Math.random() - 0.5) * W * 0.8, y: cy + (Math.random() - 0.5) * S,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.4 - 0.6,
+          r: 2 + Math.random() * 3.4, life: 520 + Math.random() * 420,
+          t: now, c: darkNow ? "#8E8CA0" : "#9C9AAE", soft: true
+        });
+      }
+    } else {
+      rings.push({ x: cx, y: cy, t: now, life: 500, big: true });
+    }
+
+    // everyone gets thrown — closer to the palm means higher
+    for (const c of [walker, ...npcs]) {
+      const d = Math.hypot(c.x - cx, c.y - cy);
+      const fall = Math.max(0, 1 - d / (W * 0.75));
+      c.hopV = -S * (5.5 + 3.5 * fall);
+      const ux = (c.x - cx) / (d || 1), uy = (c.y - cy) / (d || 1);
+      c.kx += ux * S * 5 * fall;
+      c.ky += uy * S * 3 * fall;
+    }
+
+    addXp(40);
+    toast(n + " flattened");
+    if (navigator.vibrate) navigator.vibrate([30, 40, 60]);
+  }
+
+  // a flat hand, fingers spread, seen from underneath
+  function drawPalm(cx, cy, scale, alpha) {
+    const u = Math.max(W, H) * 0.42 * scale;
+    g.save();
+    g.translate(cx, cy);
+    g.globalAlpha = alpha;
+    g.fillStyle = rgba(darkNow ? "#07070B" : "#1A1A24", 0.82);
+
+    rr(g, -u * 0.62, -u * 0.5, u * 1.24, u * 1.05, u * 0.34);   // palm
+    g.fill();
+    for (let i = 0; i < 4; i++) {                               // fingers
+      const fx = -u * 0.47 + i * u * 0.31;
+      const len = u * (i === 0 || i === 3 ? 0.72 : 0.88);
+      rr(g, fx - u * 0.13, -u * 0.5 - len, u * 0.26, len + u * 0.2, u * 0.13);
+      g.fill();
+    }
+    g.save();                                                   // thumb
+    g.rotate(-0.6);
+    rr(g, u * 0.42, -u * 0.16, u * 0.52, u * 0.26, u * 0.13);
+    g.fill();
+    g.restore();
+
+    g.globalAlpha = 1;
+    g.restore();
+  }
+
+  function drawSlap(now) {
+    if (!slapFx) return;
+    const e = now - slapFx.t0;
+
+    if (e < SLAP_FALL) {                       // coming down
+      const p = e / SLAP_FALL;
+      const drop = p * p;                      // accelerating
+      const shadow = 0.25 + drop * 0.75;
+      g.fillStyle = rgba("#000000", (darkNow ? 0.5 : 0.3) * shadow);
+      g.beginPath();
+      g.ellipse(slapFx.x, slapFx.y, W * 0.42 * shadow, H * 0.2 * shadow, 0, 0, 6.2832);
+      g.fill();
+      drawPalm(slapFx.x, slapFx.y - H * (1.3 - drop * 1.3), 0.55 + drop * 0.45, 0.4 + drop * 0.55);
+      return;
+    }
+
+    if (!slapFx.hit) { slapFx.hit = true; if (!reduced) slapLand(); }
+
+    const p = Math.min(1, (e - SLAP_FALL) / SLAP_LIFT);   // lifting off
+    if (p >= 1) { slapFx = null; return; }
+    drawPalm(slapFx.x, slapFx.y - H * 1.3 * p * p, 1 - p * 0.2, (1 - p) * 0.95);
+  }
+
   function collide(now) {
     for (const n of npcs) {
       const dx = n.x - walker.x, dy = n.y - walker.y;
@@ -1554,10 +1786,13 @@
     g.save();
     g.translate(w.x, w.y);
 
-    g.fillStyle = rgba("#000000", darkNow ? 0.36 : 0.18);
+    // the shadow stays on the ground and shrinks with altitude
+    const air = Math.min(1, -w.hop / (S * 2.2));
+    g.fillStyle = rgba("#000000", (darkNow ? 0.36 : 0.18) * (1 - air * 0.55));
     g.beginPath();
-    g.ellipse(0, u * 1.1, u * 0.54, u * 0.13, 0, 0, 6.2832);
+    g.ellipse(0, u * 1.1, u * (0.54 - air * 0.2), u * (0.13 - air * 0.05), 0, 0, 6.2832);
     g.fill();
+    g.translate(0, w.hop);
 
     g.fillStyle = body;
     for (const s of [-1, 1]) {                       // feet, tucked under the body
@@ -1678,42 +1913,110 @@
 
   /* ══ bridges ═════════════════════════════════════════════ */
 
-  function drawBridges() {
+  // Wood palette shared by both passes
+  const wood = () => ({
+    deckTop: darkNow ? "#3B3125" : "#CBAE85",
+    deckMid: darkNow ? "#2E261C" : "#B8975F",
+    deckLow: darkNow ? "#221B14" : "#9A7C54",
+    beam:    darkNow ? "#6C5B47" : "#7C6242",
+    beamLit: darkNow ? "#8A7660" : "#A2825A",
+    dark:    darkNow ? "#0B0908" : "#6B5334"
+  });
+
+  function eachBridge(fn) {
     const b = BAND(), y0 = H / 2 - b, y1 = H / 2 + b;
     const vx0 = cam.x - S, vx1 = cam.x + W + S;
-
     for (let i = 1; i < PACKS.length; i++) {
       const x0 = zoneEnd(i - 1), x1 = zoneStart(i);
       if (x1 < vx0 || x0 > vx1) continue;
+      fn(i, x0, x1, y0, y1);
+    }
+  }
+
+  // A railing: top beam, posts, a mid rail, and cross-bracing below the beam.
+  // `dir` is -1 for the far side (bracing hangs down into the deck) and +1 for
+  // the near side, so both read as standing on the deck.
+  function railing(x0, x1, y, dir) {
+    const W_ = wood();
+    const post = S * 0.7 * dir;                  // far rail rises up, near rail drops toward you
+    const step = S * 1.5;
+
+    g.strokeStyle = rgba(W_.dark, 0.5);          // bracing
+    g.lineWidth = Math.max(1, S * 0.028);
+    for (let x = x0; x < x1 - step; x += step) {
+      g.beginPath();
+      g.moveTo(x, y); g.lineTo(Math.min(x + step, x1), y + post);
+      g.moveTo(Math.min(x + step, x1), y); g.lineTo(x, y + post);
+      g.stroke();
+    }
+
+    g.strokeStyle = rgba(W_.beam, 0.9);          // mid rail
+    g.lineWidth = Math.max(1.5, S * 0.04);
+    g.beginPath(); g.moveTo(x0, y + post * 0.52); g.lineTo(x1, y + post * 0.52); g.stroke();
+
+    g.fillStyle = W_.beam;                       // posts
+    const pw = Math.max(2, S * 0.075);
+    for (let x = x0; x <= x1 + 1; x += step) {
+      const px = Math.min(x, x1);
+      g.fillRect(px - pw / 2, Math.min(y, y + post), pw, Math.abs(post));
+    }
+
+    g.strokeStyle = W_.beamLit;                  // top beam
+    g.lineWidth = Math.max(2.5, S * 0.085);
+    g.lineCap = "round";
+    g.beginPath(); g.moveTo(x0, y + post); g.lineTo(x1, y + post); g.stroke();
+    g.lineCap = "butt";
+
+    g.strokeStyle = rgba(W_.dark, 0.85);         // deck edge
+    g.lineWidth = Math.max(2, S * 0.06);
+    g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+  }
+
+  // Behind the critters: deck, planks, far railing, the barrier itself
+  function drawBridgeBack() {
+    eachBridge((i, x0, x1, y0, y1) => {
+      const W_ = wood();
 
       const deck = g.createLinearGradient(0, y0, 0, y1);
-      deck.addColorStop(0, darkNow ? "#3B3125" : "#CBAE85");
-      deck.addColorStop(0.5, darkNow ? "#2E261C" : "#B8975F");
-      deck.addColorStop(1, darkNow ? "#221B14" : "#9A7C54");
+      deck.addColorStop(0, W_.deckTop);
+      deck.addColorStop(0.5, W_.deckMid);
+      deck.addColorStop(1, W_.deckLow);
       g.fillStyle = deck;
       g.fillRect(x0, y0, x1 - x0, y1 - y0);
 
-      g.strokeStyle = rgba(darkNow ? "#0B0908" : "#7A5F3C", 0.4);   // planks
+      g.strokeStyle = rgba(W_.dark, 0.4);                       // planks
       g.lineWidth = 1;
       for (let x = x0 + S * 0.3; x < x1; x += S * 0.52) {
         g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
       }
 
-      g.strokeStyle = rgba(darkNow ? "#7A6650" : "#6E5638", 0.95);  // rails
-      g.lineWidth = Math.max(2, S * 0.07);
-      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y0); g.stroke();
-      g.beginPath(); g.moveTo(x0, y1); g.lineTo(x1, y1); g.stroke();
+      const sh = g.createLinearGradient(0, y1, 0, y1 + S * 0.8);  // shadow into the void
+      sh.addColorStop(0, rgba("#000000", darkNow ? 0.5 : 0.22));
+      sh.addColorStop(1, rgba("#000000", 0));
+      g.fillStyle = sh;
+      g.fillRect(x0, y1, x1 - x0, S * 0.8);
 
-      if (!locked(i)) continue;
+      railing(x0, x1, y0, -1);                                  // far side
 
+      if (!locked(i)) return;
       const gx = gateX(i), A = PACKS[i].accent;
-      g.strokeStyle = rgba(A, 0.95);                                // the barrier
+      g.strokeStyle = rgba(A, 0.95);
       g.lineWidth = Math.max(3, S * 0.11);
       g.setLineDash([S * 0.2, S * 0.15]);
-      g.beginPath(); g.moveTo(gx, y0 - S * 0.5); g.lineTo(gx, y1 + S * 0.5); g.stroke();
+      g.beginPath(); g.moveTo(gx, y0 - S * 0.8); g.lineTo(gx, y1 + S * 0.8); g.stroke();
       g.setLineDash([]);
-      g.fillStyle = rgba(darkNow ? "#E8E6F0" : "#22222E", 0.92);    // posts
-      for (const py of [y0 - S * 0.5, y1 + S * 0.5]) {
+    });
+  }
+
+  // In front of the critters: near railing, then the gate sign on top of all
+  function drawBridgeFront() {
+    eachBridge((i, x0, x1, y0, y1) => {
+      railing(x0, x1, y1, 1);
+
+      if (!locked(i)) return;
+      const gx = gateX(i), A = PACKS[i].accent;
+      g.fillStyle = rgba(darkNow ? "#E8E6F0" : "#22222E", 0.92);
+      for (const py of [y0 - S * 0.8, y1 + S * 0.8]) {
         g.beginPath(); g.arc(gx, py, S * 0.09, 0, 6.2832); g.fill();
       }
 
@@ -1724,9 +2027,9 @@
       g.textAlign = "center";
       g.textBaseline = "middle";
       const wide = Math.max(g.measureText(line1).width, g.measureText(line2).width) + fs * 2.4;
-      const ty = y0 - S * 1.5;
+      const ty = y0 - S * 2;
       rr(g, gx - wide / 2, ty - fs * 1.9, wide, fs * 3.8, fs * 1.9);
-      g.fillStyle = rgba(darkNow ? "#16161E" : "#FFFFFF", 0.9);
+      g.fillStyle = rgba(darkNow ? "#16161E" : "#FFFFFF", 0.92);
       g.fill();
       g.strokeStyle = rgba(A, 0.55);
       g.lineWidth = 1.5;
@@ -1735,7 +2038,7 @@
       g.fillText(line1, gx, ty - fs * 0.62);
       g.fillStyle = rgba(darkNow ? "#ECECF4" : "#1A1A24", 0.8);
       g.fillText(line2, gx, ty + fs * 0.68);
-    }
+    });
   }
 
   /* ══ draw ════════════════════════════════════════════════ */
@@ -1768,7 +2071,7 @@
     }
     g.translate(ox, oy);                      // everything below is world space
 
-    drawBridges();
+    drawBridgeBack();
 
     const half = S * sprScale / 2;
     const vx0 = cam.x - S, vx1 = cam.x + W + S;
@@ -1834,6 +2137,8 @@
 
     for (const n of npcs) drawCritter(n);
     if (walker.on) drawCritter(walker);
+    drawBridgeFront();
+    drawSlap(now);                            // the hand covers everything
 
     // rings
     for (let i = rings.length - 1; i >= 0; i--) {
@@ -1956,6 +2261,9 @@
   addEventListener("keydown", e => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab") return;
     if (e.target.closest && e.target.closest("#vol, #panel, #controls")) return;
+    // Shift must return before the pop-a-random-cell fallback below, or simply
+    // holding it to run would machine-gun the sheet
+    if (e.key === "Shift") { running = true; return; }
     const k = e.key.toLowerCase();
     if (walker.on && STEER[k]) {
       e.preventDefault();
@@ -1963,6 +2271,7 @@
       audio();
       return;
     }
+    if (k === "f") { audio(); fireSlap(); return; }
     if (e.key === " ") e.preventDefault();
     audio();
     const live = cells.filter(c => c.st === 0);
@@ -1971,10 +2280,11 @@
   });
 
   addEventListener("keyup", e => {
+    if (e.key === "Shift") { running = false; return; }
     const k = e.key.toLowerCase();
     if (held.delete(k)) steer();
   });
-  addEventListener("blur", () => { held.clear(); steer(); });
+  addEventListener("blur", () => { held.clear(); steer(); running = false; });
 
   /* ══ chrome ══════════════════════════════════════════════ */
 
@@ -1993,13 +2303,32 @@
         l.style.setProperty("--c", PACKS[i].accent);
         mapEl.appendChild(l);
       }
-      const n = document.createElement("i");
-      n.className = "node" + (locked(i) ? "" : " open") + (i === zone ? " here" : "");
+      // unlocked zones are buttons you can travel to; locked ones are inert
+      const shut = locked(i);
+      const n = document.createElement(shut ? "i" : "button");
+      n.className = "node" + (shut ? "" : " open") + (i === zone ? " here" : "");
       n.style.setProperty("--c", PACKS[i].accent);
-      n.textContent = locked(i) ? String(PACKS[i].unlock) : "";
-      n.title = locked(i) ? PACKS[i].name + " — LV " + PACKS[i].unlock : PACKS[i].name;
+      n.textContent = shut ? String(PACKS[i].unlock) : "";
+      n.title = shut ? PACKS[i].name + " — LV " + PACKS[i].unlock : "Travel to " + PACKS[i].name;
+      if (!shut) {
+        n.type = "button";
+        n.setAttribute("aria-label", "Travel to " + PACKS[i].name);
+        n.addEventListener("click", () => { audio(); teleport(i); });
+      }
       mapEl.appendChild(n);
     }
+  }
+
+  // step through the map instead of walking it
+  function teleport(i) {
+    const w = walker;
+    w.x = zoneStart(i) + zoneW / 2;
+    w.y = H / 2;
+    w.vx = w.vy = w.kx = w.ky = 0;
+    w.hop = w.hopV = 0;
+    cam.x = Math.min(Math.max(w.x - W / 2, 0), Math.max(0, worldW - W));   // snap, don't scroll the world
+    enterZone(i);
+    rings.push({ x: w.x, y: w.y, t: performance.now(), life: 520, big: true });
   }
 
   function enterZone(z) {
@@ -2021,6 +2350,21 @@
   }
 
   /* ── setup panel ────────────────────────────────────── */
+
+  const slapEl = document.getElementById("slap");
+
+  function paintSlap() {
+    const p = slapCharge / SLAP_AT;
+    slapEl.style.setProperty("--p", p.toFixed(3));
+    slapEl.classList.toggle("ready", slapCharge >= SLAP_AT);
+    slapEl.setAttribute("aria-disabled", String(slapCharge < SLAP_AT));
+    slapEl.title = slapCharge >= SLAP_AT
+      ? "Slap the whole screen (F)"
+      : "Slap charges at " + SLAP_AT + " pops — " + slapCharge + "/" + SLAP_AT;
+  }
+  slapEl.addEventListener("click", () => { audio(); fireSlap(); });
+  slapEl.addEventListener("pointerdown", e => e.stopPropagation());
+  paintSlap();
 
   const walkEl = document.getElementById("walk");
   const gearEl = document.getElementById("gear");
