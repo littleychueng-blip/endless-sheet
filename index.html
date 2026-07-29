@@ -419,7 +419,7 @@
   }
   #vol input[type="range"]:focus-visible { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 45%, transparent); }
 
-  /* ── material tray ────────────────────────────────────── */
+  /* ── world map ────────────────────────────────────────── */
   #tray-wrap {
     position: fixed;
     left: 0; right: 0;
@@ -445,58 +445,31 @@
     transition: opacity 220ms ease;
   }
 
-  #tray {
+  /* 口—口—口—口—口—口 : the strip you walk, and how far you've earned */
+  #map {
     display: flex;
-    gap: 7px;
-    max-width: 100vw;
-    padding: 8px 20px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    scroll-snap-type: x proximity;
-  }
-  #tray::-webkit-scrollbar { display: none; }
-
-  .chip {
-    flex: 0 0 auto;
-    scroll-snap-align: center;
-    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px 15px 9px 11px;
-    border: 1px solid var(--hairline);
-    border-radius: 999px;
+    padding: 8px 20px;
+    max-width: 100vw;
+  }
+  #map .node {
+    width: 20px; height: 20px;
+    border-radius: 6px;
+    border: 1.5px solid var(--hairline);
     background: var(--surface);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    display: grid; place-items: center;
+    font-size: 8px; font-style: normal; line-height: 1;
     color: var(--muted);
-    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-    font-size: 10px;
-    letter-spacing: .13em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 140ms ease;
+    transition: background 300ms ease, border-color 300ms ease, transform 300ms cubic-bezier(.2,1.5,.4,1);
   }
-  .chip:hover { color: var(--ink); transform: translateY(-1px); }
-  .chip:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
-
-  .chip .dot {
-    width: 11px; height: 11px;
-    border-radius: 50%;
-    background: var(--c);
-    opacity: .55;
-    transition: opacity 180ms ease, box-shadow 180ms ease;
+  #map .node.open { border-color: color-mix(in oklab, var(--c) 65%, transparent); color: transparent; }
+  #map .node.here {
+    border-color: var(--c);
+    background: color-mix(in oklab, var(--c) 62%, transparent);
+    transform: scale(1.22);
   }
-
-  .chip[aria-pressed="true"] {
-    color: var(--ink);
-    border-color: color-mix(in oklab, var(--c) 60%, transparent);
-    background: color-mix(in oklab, var(--c) 14%, var(--surface-2));
-  }
-  .chip[aria-pressed="true"] .dot {
-    opacity: 1;
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--c) 28%, transparent);
-  }
+  #map .link { width: 15px; height: 2px; background: var(--hairline); }
+  #map .link.open { background: color-mix(in oklab, var(--c) 55%, transparent); }
 
   /* ── first-run hint ───────────────────────────────────── */
   #hint {
@@ -532,7 +505,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     #hint span { animation: none; }
-    #count, .chip, #wash { transition: none; }
+    #count, #map .node, #wash { transition: none; }
   }
 
   @media (max-width: 560px) {
@@ -553,7 +526,7 @@
 <canvas id="sheet" aria-label="Sheet of bubbles. Tap, drag, or press any key to pop." role="img"></canvas>
 <div id="scrim"></div>
 
-<div id="hint"><span>Tap to pop. Drag for a whole row. Or drive the walker.</span></div>
+<div id="hint"><span>Tap to pop. Walk right to find the bridge.</span></div>
 
 <div id="hud">
   <div id="mark" class="mono">Endless&nbsp;Sheet</div>
@@ -624,8 +597,8 @@
 <div id="stick" aria-hidden="true"><div id="knob"></div></div>
 
 <div id="tray-wrap">
-  <div id="tag" class="mono">Cheap plastic, sharp snap</div>
-  <div id="tray" role="group" aria-label="Material"></div>
+  <div id="tag" class="mono">Bubble wrap &middot; Cheap plastic, sharp snap</div>
+  <div id="map" class="mono" role="img" aria-label="World map"></div>
 </div>
 
 <script>
@@ -811,7 +784,7 @@
 
   const panTo = x => (pans.length && x >= 0) ? pans[Math.round(Math.min(1, x / W) * 8)] : master;
 
-  function play(x) {
+  function play(x, id) {
     if (!ac) return;
     if (ac.state === "suspended") ac.resume();
     // queue rapid hits a few ms apart so a fast drag reads as a roll, not mush
@@ -820,7 +793,7 @@
     // pops fire from inside the draw loop — a bad voice must never stop the frame
     try {
       out = panTo(x);
-      VOICES[pack.id](t, 0.92 + Math.random() * 0.17);
+      VOICES[id || pack.id](t, 0.92 + Math.random() * 0.17);
     } catch (e) {
       if (!play.warned) { play.warned = true; console.error("voice failed", e); }
     }
@@ -926,13 +899,16 @@
 
   /* ══ materials ═══════════════════════════════════════════ */
 
+  // Six zones laid end to end, joined by bridges. Each one costs ten more
+  // levels than the last, so the world opens up as you play rather than
+  // sitting behind a row of buttons.
   const PACKS = [
-    { id: "wrap",   name: "Bubble wrap",   tag: "Cheap plastic, sharp snap",        accent: "#57C9A8", shape: "bubble", lattice: "hex"  },
-    { id: "clicky", name: "Clicky switch", tag: "MX blue — bright and toothy",      accent: "#5B77E5", shape: "cap",    lattice: "grid" },
-    { id: "thock",  name: "Thock",         tag: "Lubed linear, deep and creamy",    accent: "#8C9A5A", shape: "cap",    lattice: "grid" },
-    { id: "drop",   name: "Water drop",    tag: "Cave ceiling, one drip at a time", accent: "#3FA3D9", shape: "drop",   lattice: "hex"  },
-    { id: "slime",  name: "Slime",         tag: "Wet, rude, deeply satisfying",     accent: "#E0609B", shape: "blob",   lattice: "hex"  },
-    { id: "wood",   name: "Wood block",    tag: "Dry knock, temple-quiet",          accent: "#D08A3E", shape: "peg",    lattice: "grid" }
+    { id: "wrap",   name: "Bubble wrap",   tag: "Cheap plastic, sharp snap",        accent: "#57C9A8", shape: "bubble", lattice: "hex",  unlock: 0  },
+    { id: "clicky", name: "Clicky switch", tag: "MX blue — bright and toothy",      accent: "#5B77E5", shape: "cap",    lattice: "grid", unlock: 10 },
+    { id: "thock",  name: "Thock",         tag: "Lubed linear, deep and creamy",    accent: "#8C9A5A", shape: "cap",    lattice: "grid", unlock: 20 },
+    { id: "drop",   name: "Water drop",    tag: "Cave ceiling, one drip at a time", accent: "#3FA3D9", shape: "drop",   lattice: "hex",  unlock: 30 },
+    { id: "slime",  name: "Slime",         tag: "Wet, rude, deeply satisfying",     accent: "#E0609B", shape: "blob",   lattice: "hex",  unlock: 40 },
+    { id: "wood",   name: "Wood block",    tag: "Dry knock, temple-quiet",          accent: "#D08A3E", shape: "peg",    lattice: "grid", unlock: 50 }
   ];
 
   const store = {
@@ -990,7 +966,36 @@
 
   const cvs = document.getElementById("sheet");
   const g = cvs.getContext("2d");
-  let W = 0, H = 0, dpr = 1, S = 56, cells = [], sprite = null, socket = null, sprScale = 1.7;
+  let W = 0, H = 0, dpr = 1, S = 56, cells = [], sprScale = 1.7;
+
+  // one sprite pair per zone, so a bridge can show both sides at once
+  const sprites = [], sockets = [];
+
+  /* ══ the world ═══════════════════════════════════════════
+     Zones sit end to end on one long strip: 口—口—口—口—口—口.
+     Everything is drawn in world coordinates and the camera
+     translates once per frame, so nothing downstream has to know. */
+
+  let zoneW = 0, bridgeW = 0, worldW = 0, zone = 0;
+  const cam = { x: 0 };
+
+  const zoneStart = i => i * (zoneW + bridgeW);
+  const zoneEnd = i => zoneStart(i) + zoneW;
+  const gateX = i => zoneEnd(i - 1) + bridgeW * 0.22;     // barrier sits just onto the bridge
+  const locked = i => level < PACKS[i].unlock;
+
+  function zoneAt(x) {                                    // -1 while on a bridge
+    for (let i = 0; i < PACKS.length; i++) {
+      if (x >= zoneStart(i) - 1 && x <= zoneEnd(i) + 1) return i;
+    }
+    return -1;
+  }
+
+  function nearestZone(x) {
+    const i = zoneAt(x);
+    if (i >= 0) return i;
+    return Math.min(PACKS.length - 1, Math.max(0, Math.round(x / (zoneW + bridgeW))));
+  }
 
   function rr(c, x, y, w, h, r) {
     c.beginPath();
@@ -1014,16 +1019,23 @@
   }
 
   function buildSprites() {
-    const dark = darkNow = isDark();
-    const A = pack.accent;
+    darkNow = isDark();
+    sprites.length = 0;
+    sockets.length = 0;
+    for (const P of PACKS) buildPackSprites(P);
+  }
+
+  function buildPackSprites(P) {
+    const dark = darkNow;
+    const A = P.accent;
     // dark rooms get darker plastic: the accent lives in the rim and the
     // specular, not in a flat body fill that would swamp the ground
     const lit = mix(A, "#ffffff", dark ? 0.60 : 0.86);   // highlight
     const mid = mix(A, dark ? "#12121A" : "#ffffff", dark ? 0.52 : 0.42);
     const deep = mix(A, "#08080E", dark ? 0.66 : 0.30);
 
-    sprite = makeSprite((x, r) => {
-      if (pack.shape === "cap") {
+    sprites.push(makeSprite((x, r) => {
+      if (P.shape === "cap") {
         // an extruded keycap: side walls, a top face lifted off them, a dish
         const s = r * 1.9, o = -s / 2, rad = s * 0.2;
         const base = mix(A, dark ? "#3C3C4A" : "#FFFFFF", dark ? 0.6 : 0.52);
@@ -1056,7 +1068,7 @@
         x.moveTo(o + ins + rad * 0.7, o + ins - lift + 0.7);
         x.lineTo(o + s - ins - rad * 0.7, o + ins - lift + 0.7);
         x.stroke();
-      } else if (pack.shape === "peg") {
+      } else if (P.shape === "peg") {
         const grad = x.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r);
         grad.addColorStop(0, mix(A, "#ffffff", dark ? 0.35 : 0.55));
         grad.addColorStop(0.72, mix(A, dark ? "#241A10" : "#8A5A28", 0.42));
@@ -1073,7 +1085,7 @@
         }
       } else {
         // bubble / droplet / blob — translucent, glossy
-        const wob = pack.shape === "blob";
+        const wob = P.shape === "blob";
         const path = () => {
           x.beginPath();
           if (!wob) { x.arc(0, 0, r, 0, 6.2832); return; }
@@ -1084,7 +1096,7 @@
           }
           x.closePath();
         };
-        const sharp = pack.shape === "drop";
+        const sharp = P.shape === "drop";
         const grad = x.createRadialGradient(-r * 0.34, -r * 0.38, r * 0.06, 0, 0, r * 1.06);
         grad.addColorStop(0, rgba(lit, sharp ? 0.85 : 0.72));
         grad.addColorStop(0.42, rgba(mid, dark ? 0.62 : 0.42));
@@ -1101,11 +1113,11 @@
         x.fillStyle = sg;
         x.beginPath(); x.ellipse(-r * 0.36, -r * 0.4, r * 0.4, r * 0.3, -0.5, 0, 6.2832); x.fill();
       }
-    });
+    }));
 
-    socket = makeSprite((x, r) => {
+    sockets.push(makeSprite((x, r) => {
       const hole = mix(dark ? "#0A0A10" : "#B9B7C4", A, 0.18);
-      if (pack.shape === "cap") {
+      if (P.shape === "cap") {
         const s = r * 1.68, o = -s / 2;
         x.fillStyle = rgba(hole, dark ? 0.72 : 0.42);
         rr(x, o, o, s, s, s * 0.2); x.fill();
@@ -1122,7 +1134,7 @@
         x.lineWidth = 1;
         x.beginPath(); x.arc(0, r * 0.06, r * 0.7, 0.5, 2.64); x.stroke();
       }
-    });
+    }));
   }
 
   function layout() {
@@ -1133,45 +1145,38 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     S = Math.max(38, Math.min(68, Math.hypot(W, H) / 21));
-    const hex = pack.lattice === "hex";
-    const pitch = hex ? 1.03 : (pack.shape === "cap" ? 1.06 : 1.12);   // caps sit close, like a board
-    const stepX = S * pitch;
-    const stepY = S * (hex ? 0.9 : pitch);
-    const cols = Math.ceil(W / stepX) + 2;
-    const rows = Math.ceil(H / stepY) + 2;
-    const offX = (W - (cols - 1) * stepX) / 2;
-    const offY = (H - (rows - 1) * stepY) / 2;
+    zoneW = Math.max(W * 1.25, S * 16);
+    bridgeW = S * 6.5;
+    worldW = PACKS.length * zoneW + (PACKS.length - 1) * bridgeW;
 
-    const old = cells;
     cells = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const x = offX + c * stepX + (hex && r % 2 ? stepX / 2 : 0);
-        const y = offY + r * stepY;
-        if (x < -S || x > W + S || y < -S || y > H + S) continue;
-        cells.push({ x, y, st: 0, t: 0, wait: 0 });
-      }
-    }
-    // keep the sheet's popped state across resizes where we can
-    if (old.length) {
-      for (const o of old) {
-        if (o.st === 0) continue;
-        let best = null, bd = S * S;
-        for (const c of cells) {
-          const d = (c.x - o.x) ** 2 + (c.y - o.y) ** 2;
-          if (d < bd) { bd = d; best = c; }
+    for (let i = 0; i < PACKS.length; i++) {
+      const P = PACKS[i];
+      const hex = P.lattice === "hex";
+      const pitch = hex ? 1.03 : (P.shape === "cap" ? 1.06 : 1.12);   // caps sit close, like a board
+      const stepX = S * pitch;
+      const stepY = S * (hex ? 0.9 : pitch);
+      const x0 = zoneStart(i), x1 = zoneEnd(i);
+      const cols = Math.ceil((x1 - x0) / stepX);
+      const rows = Math.ceil(H / stepY) + 2;
+      const offY = (H - (rows - 1) * stepY) / 2;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = x0 + stepX * 0.5 + c * stepX + (hex && r % 2 ? stepX / 2 : 0);
+          const y = offY + r * stepY;
+          if (x > x1 - stepX * 0.2 || y < -S || y > H + S) continue;
+          cells.push({ x, y, z: i, st: 0, t: 0, wait: 0 });
         }
-        if (best) { best.st = o.st; best.t = o.t; best.wait = o.wait; }
       }
     }
 
-    if (!walker.x) { walker.x = W / 2; walker.y = H * 0.45; }
-    else {
-      walker.x = Math.min(Math.max(walker.x, S * 0.44), W - S * 0.44);
-      walker.y = Math.min(Math.max(walker.y, S * 0.44), H - S * 0.44);
-    }
-    fitNpcs();
+    if (!walker.x) { walker.x = zoneStart(0) + zoneW / 2; walker.y = H * 0.5; }
+    walker.x = Math.min(Math.max(walker.x, S * 0.44), worldW - S * 0.44);
+    walker.y = Math.min(Math.max(walker.y, S * 0.44), H - S * 0.44);
+    cam.x = Math.min(Math.max(walker.x - W / 2, 0), Math.max(0, worldW - W));
+
     buildSprites();
+    enterZone(nearestZone(walker.x));        // keeps the readout honest after a resize
   }
 
   /* ══ pops ════════════════════════════════════════════════ */
@@ -1180,12 +1185,14 @@
   const INFLATE_MS = reduced ? 140 : 420;
   const parts = [];
   const rings = [];
+  const dents = [];
 
-  function burstFx(x, y) {
-    const A = pack.accent;
+  function burstFx(x, y, P) {
+    P = P || pack;
+    const A = P.accent;
     rings.push({ x, y, t: performance.now(), life: reduced ? 220 : 420 });
     if (reduced || parts.length > 260) return;
-    const n = pack.shape === "cap" ? 4 : 8;
+    const n = P.shape === "cap" ? 4 : 8;
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.2832, sp = (0.7 + Math.random() * 2.2) * (S / 56);
       parts.push({
@@ -1234,7 +1241,10 @@
   }
 
   function levelUp() {
-    toast("Level " + level);
+    // crossing a zone's requirement is the real event — say so
+    const opened = PACKS.find(P => P.unlock === level);
+    toast(opened ? opened.name + " unlocked" : "Level " + level);
+    paintMap();
     fanfare();
     lvlEl.classList.add("up");
     setTimeout(() => lvlEl.classList.remove("up"), 260);
@@ -1261,29 +1271,31 @@
   }
 
   function popCell(c, now) {
+    const P = PACKS[c.z];                     // a cell sounds like the zone it belongs to
     c.st = 1; c.t = now;
-    burstFx(c.x, c.y);
-    play(c.x);
+    burstFx(c.x, c.y, P);
+    play(c.x - cam.x, P.id);                  // panned by where it is on screen
     pops++;
     countEl.textContent = fmt(pops);
     countEl.classList.add("tick");
     setTimeout(() => countEl.classList.remove("tick"), 90);
     addXp(1);
     if (pops % 10 === 0) { store.set("pops", pops); store.set("exp", exp); }
-    if (navigator.vibrate) navigator.vibrate(pack.shape === "cap" ? 6 : 10);
+    if (navigator.vibrate) navigator.vibrate(P.shape === "cap" ? 6 : 10);
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
   function hit(px, py) {
     const now = performance.now();
+    const wx = px + cam.x;                    // screen to world
     let best = null, bd = (S * 1.05) ** 2;
     for (const c of cells) {
       if (c.st !== 0) continue;
-      const d = (c.x - px) ** 2 + (c.y - py) ** 2;
+      const d = (c.x - wx) ** 2 + (c.y - py) ** 2;
       if (d < bd) { bd = d; best = c; }
     }
     if (best) popCell(best, now);
-    else rings.push({ x: px, y: py, t: now, life: 300 });   // nothing left there — still answer the touch
+    else rings.push({ x: wx, y: py, t: now, life: 300 });   // nothing left there — still answer the touch
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
@@ -1304,17 +1316,24 @@
     while (npcs.length > want) npcs.pop();
     while (npcs.length < want) {
       npcs.push({
-        x: S + Math.random() * Math.max(1, W - S * 2),
-        y: S + Math.random() * Math.max(1, H - S * 2),
+        x: 0, y: 0, z: zone,
         vx: 0, vy: 0, kx: 0, ky: 0,
         hx: 0, hy: 0, tx: 0, ty: 0, turn: 0, cool: 0,
         step: Math.random() * 6, face: 1, blink: 0, nextBlink: 1200 + Math.random() * 3400,
         scale: 0.8, belt: false
       });
+      npcs[npcs.length - 1].z = -1;                    // forces a placement below
     }
+    // they live in whichever zone you're standing in, so the world around you
+    // is always inhabited without simulating five empty zones
     const pad = S * 0.5;
     for (const n of npcs) {
-      n.x = Math.min(Math.max(n.x, pad), W - pad);
+      if (n.z !== zone) {
+        n.z = zone;
+        n.x = zoneStart(zone) + pad + Math.random() * Math.max(1, zoneW - pad * 2);
+        n.y = pad + Math.random() * Math.max(1, H - pad * 2);
+      }
+      n.x = Math.min(Math.max(n.x, zoneStart(n.z) + pad), zoneEnd(n.z) - pad);
       n.y = Math.min(Math.max(n.y, pad), H - pad);
     }
   }
@@ -1328,13 +1347,63 @@
     if (c.cool > 0) c.cool -= dt;
   }
 
-  function trample(c, now, reach) {
+  function trample(c, now, reach, heavy) {
     const r2 = reach * reach;
     for (const cell of cells) {
       if (cell.st !== 0) continue;
-      if ((cell.x - c.x) ** 2 + (cell.y - c.y) ** 2 < r2) popCell(cell, now);
+      if ((cell.x - c.x) ** 2 + (cell.y - c.y) ** 2 >= r2) continue;
+      popCell(cell, now);
+      if (heavy) stompFx(cell, c);
     }
   }
+
+  // A stomp should land harder than a tap: the cell throws its shards along
+  // the direction of travel, a tight ring snaps outward, and the ground takes
+  // a brief dent. Tapping stays quiet by comparison — that contrast is the point.
+  function stompFx(cell, w) {
+    if (reduced) return;
+    const A = PACKS[cell.z].accent;
+    rings.push({ x: cell.x, y: cell.y, t: performance.now(), life: 300, stomp: true });
+    dents.push({ x: cell.x, y: cell.y, t: performance.now(), life: 520 });
+    if (dents.length > 40) dents.shift();
+
+    const sp = Math.hypot(w.vx, w.vy) || 1;
+    const ux = w.vx / sp, uy = w.vy / sp;
+    const n = parts.length > 220 ? 4 : 10;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.2832;
+      const kick = (1.1 + Math.random() * 3.4) * (S / 56);
+      parts.push({
+        x: cell.x, y: cell.y,
+        vx: Math.cos(a) * kick + ux * 2.4,           // thrown the way you're heading
+        vy: Math.sin(a) * kick + uy * 2.4 - 1,
+        r: 1.2 + Math.random() * 2.8,
+        life: 380 + Math.random() * 420,
+        t: performance.now(), c: A
+      });
+    }
+  }
+
+  // dust under the foot each time a step lands
+  function footfall(w) {
+    if (reduced) return;
+    const u = S * 0.55 * w.scale;
+    const side = Math.sin(w.step) > 0 ? 1 : -1;
+    for (let i = 0; i < 5; i++) {
+      const a = Math.PI + (Math.random() - 0.5) * 2.2;
+      const sp = (0.4 + Math.random() * 1.1) * (S / 56);
+      parts.push({
+        x: w.x + side * u * 0.34, y: w.y + u * 0.98,
+        vx: Math.cos(a) * sp - w.vx * 0.004,
+        vy: Math.sin(a) * sp * 0.5 - 0.5,
+        r: 1 + Math.random() * 2.2,
+        life: 260 + Math.random() * 240,
+        t: performance.now(), c: darkNow ? "#8E8CA0" : "#9C9AAE", soft: true
+      });
+    }
+  }
+
+  const BAND = () => S * 1.7;                 // half-height of the bridge deck
 
   function stepWalker(now, dt) {
     const w = walker;
@@ -1347,15 +1416,38 @@
     w.x += w.vx * dt; w.y += w.vy * dt;
 
     const pad = S * 0.44;
-    w.x = Math.min(Math.max(w.x, pad), W - pad);
+    w.x = Math.min(Math.max(w.x, pad), worldW - pad);
     w.y = Math.min(Math.max(w.y, pad), H - pad);
 
+    // a locked bridge stops you at the barrier
+    for (let i = 1; i < PACKS.length; i++) {
+      if (!locked(i)) continue;
+      const gx = gateX(i) - S * 0.5;
+      if (w.x > gx && w.x < zoneStart(i) + zoneW * 0.5) {
+        w.x = gx;
+        if (w.kx > 0) w.kx = 0;
+      }
+    }
+
+    // on a bridge you walk the deck, not the void
+    if (zoneAt(w.x) < 0) {
+      const b = BAND();
+      w.y = Math.min(Math.max(w.y, H / 2 - b), H / 2 + b);
+    }
+
     if (Math.abs(ix) > 0.06) w.face += ((ix > 0 ? 1 : -1) - w.face) * Math.min(1, dt * 9);
+
+    const before = Math.sin(w.step);
     tick(w, dt, mag);
+    // a footfall is the moment the gait crosses zero — that's when it lands
+    if (mag > 0.15 && before * Math.sin(w.step) <= 0) footfall(w);
 
     // trample what it walks over — only while actually moving, so standing
     // still doesn't turn into a machine gun as the cells refill underneath
-    if (mag > 0.02 || Math.hypot(w.kx, w.ky) > S) trample(w, now, S * 0.56);
+    if (mag > 0.02 || Math.hypot(w.kx, w.ky) > S) trample(w, now, S * 0.56, true);
+
+    const z = zoneAt(w.x);
+    if (z >= 0 && z !== zone) enterZone(z);
   }
 
   function stepNpc(n, now, dt) {
@@ -1374,9 +1466,11 @@
     n.vx = n.hx * speed + n.kx; n.vy = n.hy * speed + n.ky;
     n.x += n.vx * dt; n.y += n.vy * dt;
 
+    // wanderers keep to their own zone — they never cross a bridge
     const pad = S * 0.5;
-    if (n.x < pad) { n.x = pad; n.tx = n.hx = Math.abs(n.hx) + 0.2; }
-    if (n.x > W - pad) { n.x = W - pad; n.tx = n.hx = -Math.abs(n.hx) - 0.2; }
+    const lo = zoneStart(n.z) + pad, hi = zoneEnd(n.z) - pad;
+    if (n.x < lo) { n.x = lo; n.tx = n.hx = Math.abs(n.hx) + 0.2; }
+    if (n.x > hi) { n.x = hi; n.tx = n.hx = -Math.abs(n.hx) - 0.2; }
     if (n.y < pad) { n.y = pad; n.ty = n.hy = Math.abs(n.hy) + 0.2; }
     if (n.y > H - pad) { n.y = H - pad; n.ty = n.hy = -Math.abs(n.hy) - 0.2; }
 
@@ -1384,7 +1478,7 @@
     if (Math.abs(n.vx) > S * 0.2) n.face += ((n.vx > 0 ? 1 : -1) - n.face) * Math.min(1, dt * 7);
     tick(n, dt, mag);
 
-    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) trample(n, now, S * 0.46);
+    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) trample(n, now, S * 0.46, false);
   }
 
   // a collision is a small event: shove them two bodies apart, then blow
@@ -1582,6 +1676,68 @@
     }
   }
 
+  /* ══ bridges ═════════════════════════════════════════════ */
+
+  function drawBridges() {
+    const b = BAND(), y0 = H / 2 - b, y1 = H / 2 + b;
+    const vx0 = cam.x - S, vx1 = cam.x + W + S;
+
+    for (let i = 1; i < PACKS.length; i++) {
+      const x0 = zoneEnd(i - 1), x1 = zoneStart(i);
+      if (x1 < vx0 || x0 > vx1) continue;
+
+      const deck = g.createLinearGradient(0, y0, 0, y1);
+      deck.addColorStop(0, darkNow ? "#3B3125" : "#CBAE85");
+      deck.addColorStop(0.5, darkNow ? "#2E261C" : "#B8975F");
+      deck.addColorStop(1, darkNow ? "#221B14" : "#9A7C54");
+      g.fillStyle = deck;
+      g.fillRect(x0, y0, x1 - x0, y1 - y0);
+
+      g.strokeStyle = rgba(darkNow ? "#0B0908" : "#7A5F3C", 0.4);   // planks
+      g.lineWidth = 1;
+      for (let x = x0 + S * 0.3; x < x1; x += S * 0.52) {
+        g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
+      }
+
+      g.strokeStyle = rgba(darkNow ? "#7A6650" : "#6E5638", 0.95);  // rails
+      g.lineWidth = Math.max(2, S * 0.07);
+      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y0); g.stroke();
+      g.beginPath(); g.moveTo(x0, y1); g.lineTo(x1, y1); g.stroke();
+
+      if (!locked(i)) continue;
+
+      const gx = gateX(i), A = PACKS[i].accent;
+      g.strokeStyle = rgba(A, 0.95);                                // the barrier
+      g.lineWidth = Math.max(3, S * 0.11);
+      g.setLineDash([S * 0.2, S * 0.15]);
+      g.beginPath(); g.moveTo(gx, y0 - S * 0.5); g.lineTo(gx, y1 + S * 0.5); g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = rgba(darkNow ? "#E8E6F0" : "#22222E", 0.92);    // posts
+      for (const py of [y0 - S * 0.5, y1 + S * 0.5]) {
+        g.beginPath(); g.arc(gx, py, S * 0.09, 0, 6.2832); g.fill();
+      }
+
+      const line1 = PACKS[i].name.toUpperCase();
+      const line2 = "LV " + PACKS[i].unlock + " TO UNLOCK";
+      const fs = Math.max(9, Math.round(S * 0.23));
+      g.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      const wide = Math.max(g.measureText(line1).width, g.measureText(line2).width) + fs * 2.4;
+      const ty = y0 - S * 1.5;
+      rr(g, gx - wide / 2, ty - fs * 1.9, wide, fs * 3.8, fs * 1.9);
+      g.fillStyle = rgba(darkNow ? "#16161E" : "#FFFFFF", 0.9);
+      g.fill();
+      g.strokeStyle = rgba(A, 0.55);
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.fillStyle = rgba(A, 1);
+      g.fillText(line1, gx, ty - fs * 0.62);
+      g.fillStyle = rgba(darkNow ? "#ECECF4" : "#1A1A24", 0.8);
+      g.fillText(line2, gx, ty + fs * 0.68);
+    }
+  }
+
   /* ══ draw ════════════════════════════════════════════════ */
 
   const easeOut = t => 1 - Math.pow(1 - t, 3);
@@ -1596,27 +1752,40 @@
     for (const n of npcs) stepNpc(n, now, dt);
     if (walker.on) collide(now);
 
+    // the camera trails the walker down the strip
+    const focus = walker.on ? walker.x : cam.x + W / 2;
+    const target = Math.min(Math.max(focus - W / 2, 0), Math.max(0, worldW - W));
+    cam.x += (target - cam.x) * Math.min(1, dt * 7);
+
     g.clearRect(0, 0, W, H);
     g.save();
+    let ox = -cam.x, oy = 0;
     if (shake > 0) {
       shake = Math.max(0, shake - dt * 4.5);
       const m = S * 0.17 * shake * shake;
-      g.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+      ox += (Math.random() - 0.5) * m;
+      oy += (Math.random() - 0.5) * m;
     }
+    g.translate(ox, oy);                      // everything below is world space
+
+    drawBridges();
+
     const half = S * sprScale / 2;
+    const vx0 = cam.x - S, vx1 = cam.x + W + S;
 
     for (const c of cells) {
+      if (c.x < vx0 || c.x > vx1) continue;   // only what the camera can see
       const e = now - c.t;
       if (c.st === 1 && e > POP_MS) { c.st = 2; c.t = now; c.wait = 1500 + Math.random() * 2800; }
       else if (c.st === 2 && e > c.wait) { c.st = 3; c.t = now; }
       else if (c.st === 3 && e > INFLATE_MS) { c.st = 0; c.t = now; }
 
-      if (c.st !== 0) g.drawImage(socket, c.x - half, c.y - half, S * sprScale, S * sprScale);
+      if (c.st !== 0) g.drawImage(sockets[c.z], c.x - half, c.y - half, S * sprScale, S * sprScale);
 
       let sc = 1, al = 1;
       if (c.st === 1) {
         const p = Math.min(1, e / POP_MS);
-        sc = 1 + easeOut(p) * (pack.shape === "cap" ? -0.22 : 0.42);
+        sc = 1 + easeOut(p) * (PACKS[c.z].shape === "cap" ? -0.22 : 0.42);
         al = 1 - p * p;
       } else if (c.st === 2) {
         continue;
@@ -1629,8 +1798,38 @@
 
       const d = S * sprScale * sc;
       g.globalAlpha = al;
-      g.drawImage(sprite, c.x - d / 2, c.y - d / 2, d, d);
+      g.drawImage(sprites[c.z], c.x - d / 2, c.y - d / 2, d, d);
       g.globalAlpha = 1;
+    }
+
+    // the dent a stomp leaves, fading out of the ground
+    for (let i = dents.length - 1; i >= 0; i--) {
+      const q = dents[i], p = (now - q.t) / q.life;
+      if (p >= 1) { dents.splice(i, 1); continue; }
+      const rad = S * (0.45 + p * 0.5);
+      const dg = g.createRadialGradient(q.x, q.y, 0, q.x, q.y, rad);
+      dg.addColorStop(0, rgba("#000000", (1 - p) * (darkNow ? 0.34 : 0.16)));
+      dg.addColorStop(1, rgba("#000000", 0));
+      g.fillStyle = dg;
+      g.fillRect(q.x - rad, q.y - rad, rad * 2, rad * 2);
+    }
+
+    // everything past the barrier fades out — visible enough to want, dim
+    // enough to read as not yours yet
+    for (let i = 1; i < PACKS.length; i++) {
+      if (!locked(i)) continue;
+      const x0 = gateX(i);
+      if (x0 > vx1) break;
+      const gc = darkNow ? "#0C0C11" : "#E2E1E9";
+      const fade = bridgeW * 1.1;
+      const vg = g.createLinearGradient(x0, 0, x0 + fade, 0);
+      vg.addColorStop(0, rgba(gc, 0));
+      vg.addColorStop(1, rgba(gc, 0.7));
+      g.fillStyle = vg;
+      g.fillRect(x0, 0, fade, H);
+      g.fillStyle = rgba(gc, 0.7);
+      g.fillRect(x0 + fade, 0, Math.max(0, worldW - x0 - fade), H);
+      break;
     }
 
     for (const n of npcs) drawCritter(n);
@@ -1641,10 +1840,13 @@
       const r = rings[i], p = (now - r.t) / r.life;
       if (p >= 1) { rings.splice(i, 1); continue; }
       if (p < 0) continue;                                  // staggered blast ring, not due yet
+      const grow = r.big ? 0.3 + easeOut(p) * 2.5
+        : r.stomp ? 0.28 + easeOut(p) * 1.45
+        : 0.34 + easeOut(p) * 0.8;
       g.beginPath();
-      g.arc(r.x, r.y, S * (r.big ? 0.3 + easeOut(p) * 2.5 : 0.34 + easeOut(p) * 0.8), 0, 6.2832);
-      g.strokeStyle = rgba(pack.accent, (1 - p) * (r.big ? 0.8 : 0.5));
-      g.lineWidth = (r.big ? 4 : 2) * (1 - p) + 0.4;
+      g.arc(r.x, r.y, S * grow, 0, 6.2832);
+      g.strokeStyle = rgba(PACKS[nearestZone(r.x)].accent, (1 - p) * (r.big ? 0.8 : r.stomp ? 0.9 : 0.5));
+      g.lineWidth = (r.big ? 4 : r.stomp ? 5 : 2) * (1 - p) + 0.4;
       g.stroke();
     }
 
@@ -1665,10 +1867,13 @@
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i], p = (now - q.t) / q.life;
       if (p >= 1) { parts.splice(i, 1); continue; }
-      q.x += q.vx; q.y += q.vy; q.vy += 0.08; q.vx *= 0.985; q.vy *= 0.985;
+      q.x += q.vx; q.y += q.vy;
+      q.vy += q.soft ? 0.02 : 0.08;              // dust hangs, shards fall
+      q.vx *= q.soft ? 0.94 : 0.985;
+      q.vy *= q.soft ? 0.94 : 0.985;
       g.beginPath();
-      g.arc(q.x, q.y, q.r * (1 - p * 0.6), 0, 6.2832);
-      g.fillStyle = rgba(q.c, (1 - p) * 0.72);
+      g.arc(q.x, q.y, q.r * (q.soft ? 1 + p * 0.9 : 1 - p * 0.6), 0, 6.2832);
+      g.fillStyle = rgba(q.c, (1 - p) * (q.soft ? 0.3 : 0.72));
       g.fill();
     }
 
@@ -1750,7 +1955,7 @@
 
   addEventListener("keydown", e => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab") return;
-    if (e.target.closest && e.target.closest("#tray, #vol, #panel, #controls")) return;
+    if (e.target.closest && e.target.closest("#vol, #panel, #controls")) return;
     const k = e.key.toLowerCase();
     if (walker.on && STEER[k]) {
       e.preventDefault();
@@ -1773,33 +1978,46 @@
 
   /* ══ chrome ══════════════════════════════════════════════ */
 
-  const tray = document.getElementById("tray");
+  const mapEl = document.getElementById("map");
   const tagEl = document.getElementById("tag");
   const nameEl = document.getElementById("packname");
 
-  function selectPack(p) {
-    pack = p;
-    store.set("pack", p.id);
-    document.documentElement.style.setProperty("--accent", p.accent);
-    nameEl.textContent = p.name.toLowerCase();
-    tagEl.style.opacity = "0";
-    setTimeout(() => { tagEl.textContent = p.tag; tagEl.style.opacity = "1"; }, 180);
-    for (const b of tray.children) b.setAttribute("aria-pressed", String(b.dataset.id === p.id));
-    layout();
-    droneTune();                             // the pad follows the material
-    if (ac) { play(W / 2); }
+  // You change material by walking into it, so the tray is a map now: it
+  // shows where you are, what's open, and what the next one costs.
+  function paintMap() {
+    mapEl.textContent = "";
+    for (let i = 0; i < PACKS.length; i++) {
+      if (i) {
+        const l = document.createElement("s");
+        l.className = "link" + (locked(i) ? "" : " open");
+        l.style.setProperty("--c", PACKS[i].accent);
+        mapEl.appendChild(l);
+      }
+      const n = document.createElement("i");
+      n.className = "node" + (locked(i) ? "" : " open") + (i === zone ? " here" : "");
+      n.style.setProperty("--c", PACKS[i].accent);
+      n.textContent = locked(i) ? String(PACKS[i].unlock) : "";
+      n.title = locked(i) ? PACKS[i].name + " — LV " + PACKS[i].unlock : PACKS[i].name;
+      mapEl.appendChild(n);
+    }
   }
 
-  for (const p of PACKS) {
-    const b = document.createElement("button");
-    b.className = "chip";
-    b.type = "button";
-    b.dataset.id = p.id;
-    b.style.setProperty("--c", p.accent);
-    b.setAttribute("aria-pressed", String(p.id === pack.id));
-    b.innerHTML = '<span class="dot"></span>' + p.name;
-    b.addEventListener("click", () => { audio(); selectPack(p); });
-    tray.appendChild(b);
+  function enterZone(z) {
+    zone = z;
+    pack = PACKS[z];
+    store.set("pack", pack.id);
+    document.documentElement.style.setProperty("--accent", pack.accent);
+    nameEl.textContent = pack.name.toLowerCase();
+    const label = pack.name + " · " + pack.tag;
+    if (tagEl.textContent === label) {                 // same zone: no pointless flicker
+      tagEl.style.opacity = "1";
+    } else {
+      tagEl.style.opacity = "0";
+      setTimeout(() => { tagEl.textContent = label; tagEl.style.opacity = "1"; }, 180);
+    }
+    droneTune();                             // the pad follows the material
+    fitNpcs();
+    paintMap();
   }
 
   /* ── setup panel ────────────────────────────────────── */
@@ -1920,10 +2138,8 @@
 
   countEl.textContent = fmt(pops);
   paintXp();
-  document.documentElement.style.setProperty("--accent", pack.accent);
-  nameEl.textContent = pack.name.toLowerCase();
-  tagEl.textContent = pack.tag;
-  layout();
+  tagEl.textContent = PACKS[0].name + " · " + PACKS[0].tag;
+  layout();                                  // builds the world and dresses the UI for wherever you are
   requestAnimationFrame(frame);
 })();
 </script>
