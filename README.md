@@ -44,6 +44,32 @@ The Coolify mirror does **not** follow a push. Redeploy it by hand from the
 Coolify UI if you want the two in sync (note its Redeploy button needs a
 double click — a single click only hovers).
 
+## The relay is deployed separately — and almost never
+
+Two things are deployed, and they move on different schedules:
+
+| What | Where | When it needs deploying |
+|---|---|---|
+| the game (`src/app.html` → `index.html`) | GitHub Pages | every `git push`, automatic |
+| the relay (`server/worker.js`) | Cloudflare Workers | only when `server/worker.js` changes |
+
+The relay holds no game logic — it hands out ids and forwards whatever it
+receives, byte for byte. New zones, sounds, wardrobe items, levels, even new
+fields in the multiplayer messages all live in `app.html`, so a normal update
+is just build + push. **Nothing to re-upload to Cloudflare.**
+
+Redeploy the relay only if you edit `server/worker.js` itself (raising
+`MAX_PEERS`, adding a route):
+
+```bash
+cd server && npx wrangler deploy
+```
+
+One thing to watch: everyone in a room runs whatever copy of the page their
+browser loaded. Change the message format and a friend who hasn't reloaded is
+speaking the old dialect — tell people to hard reload after a multiplayer
+change.
+
 ## Where it runs
 
 Google Cloud VM, Coolify v4, project `endless-sheet` / production. Build pack
