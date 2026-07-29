@@ -3,7 +3,14 @@
 Infinite bubble wrap — tap, drag, or drive a little character over it. Six
 synthesised sound materials, wandering NPCs, levels, generative ambient music.
 
-Live: http://no9k2hqgkxidx8rzwfn8mdb3.35.202.38.29.sslip.io/
+**Live: https://littleychueng-blip.github.io/endless-sheet/**
+
+That's the URL to share. It's real HTTPS on GitHub's CDN, so it works for
+everyone. The Coolify copy on the VM
+(http://no9k2hqgkxidx8rzwfn8mdb3.35.202.38.29.sslip.io/) still runs as a
+mirror, but don't hand it out: `sslip.io` gets blocked by some DNS resolvers,
+and it has no certificate, so any browser with HTTPS-First turned on fails to
+open it.
 
 ## Layout
 
@@ -28,9 +35,14 @@ git commit -am "what changed"
 git push
 ```
 
-Coolify sees the push and redeploys on its own. About 30 seconds from `git
-push` to the new version being live. `nginx.conf` sends `no-cache` on the
-entry file, so a reload picks it up rather than serving a pinned copy.
+GitHub Pages republishes on its own within a minute or so of the push. It
+serves `index.html` with `cache-control: max-age=600`, so a browser that
+already has the page can sit on the old copy for up to ten minutes — hard
+reload if you need to see a change immediately.
+
+The Coolify mirror does **not** follow a push. Redeploy it by hand from the
+Coolify UI if you want the two in sync (note its Redeploy button needs a
+double click — a single click only hovers).
 
 ## Where it runs
 
