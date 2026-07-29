@@ -1822,7 +1822,7 @@
 
   const ROOM = "friends";
   const SEND_HZ = 12;
-  const DEFAULT_RELAY = "";                  // set to the Worker's wss:// URL once deployed
+  const DEFAULT_RELAY = "wss://sheet-relay.realworldkelvin.workers.dev";
 
   // ?relay=wss://… overrides and sticks, so the address can change without a rebuild
   const relayParam = new URLSearchParams(location.search).get("relay");
