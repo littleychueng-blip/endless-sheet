@@ -101,6 +101,32 @@ both are easy to break by accident:
 
 Level, XP and wardrobe stay local — those are yours, not the room's.
 
+### The paired emotes
+
+Two people showing the same face within two seconds, and **within three body
+widths** of each other, turns into a scene. Both machines work out the pair from
+the same two emote messages, so the scene itself is never sent:
+
+- **❤️ ❤️** — they hug, then it goes off: a pink shockfront travels out from the
+  spot they were standing on and takes the sheet with it. Same `crossWave` the
+  slap uses, so it clears the same cells on every screen.
+- **💀 💀** — three punches, then a **ten-second duel**. Both of them pop as
+  fast as they can; whoever pops less is caged where they stand for ten seconds.
+
+The duel is the one place a *number* has to travel: each side counts its own
+pops and sends the total four times a second (`{t:"d", s}`), with one guaranteed
+last send when the clock runs out. Both machines then compare the same two
+numbers and reach the same verdict, so nobody has to referee. A tie jails
+nobody. Two rules to keep in mind if you touch this:
+
+- pairing measures **`atX`/`atY`** — the position a peer last *reported*, not
+  the interpolated one on screen. Near the three-body line those differ, and
+  reading the drawn position gets you one client pairing while the other does
+  not: half a hug is worse than none.
+- `pairUp()` runs every frame while a face is up, not just on the keypress.
+  Positions land twelve times a second, so a pair often comes together a beat
+  after the second face appears.
+
 ## Where it runs
 
 Google Cloud VM, Coolify v4, project `endless-sheet` / production. Build pack

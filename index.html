@@ -964,6 +964,22 @@
     out = master;
   }
 
+  // a hug letting go: a soft thump under a major chord that blooms upward
+  function heartBloom(x) {
+    if (!ac) return;
+    try {
+      out = panTo(x);
+      const t = ac.currentTime + 0.001;
+      burst(t, { type: "lowpass", freq: 420, q: 1, gain: 0.5, d: 0.22 });
+      tone(t, { from: 110, to: 66, sweep: 0.3, gain: 0.6, a: 0.006, d: 0.5 });
+      [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {   // C E G C, spread out
+        tone(t + 0.02 + i * 0.045, { wave: "triangle", from: f, gain: 0.22, a: 0.01, d: 0.45 });
+      });
+      tone(t + 0.24, { wave: "sine", from: 1567.98, gain: 0.1, a: 0.02, d: 0.7 });
+    } catch (e) { /* silence beats a dead render loop */ }
+    out = master;
+  }
+
   // the shove when two of them collide — no pack of its own, just weight
   function boom(x) {
     if (!ac) return;
@@ -1472,6 +1488,7 @@
     play((c.x - cam.x) * k, P.id);            // panned by where it is on screen
     if (mine === false) return;
     pops++;
+    if (duel && duel.me) duel.me.duelPops++;  // ten seconds, and this is the score
     countEl.textContent = fmt(pops);
     countEl.classList.add("tick");
     setTimeout(() => countEl.classList.remove("tick"), 90);
@@ -1490,6 +1507,7 @@
     c.st = 1; c.t = now;
     if (mine === false) return;
     pops++;
+    if (duel && duel.me) duel.me.duelPops++;
     addXp(1);
   }
 
@@ -1624,6 +1642,22 @@
     const w = walker;
     let ix = stick.dx + keyVec.x, iy = stick.dy + keyVec.y;
     if (w.duet) ix = iy = 0;                    // a hug drives you; you don't
+
+    // Behind bars you can lean on them and you can still pop whatever is in
+    // reach — you just aren't going anywhere for ten seconds.
+    if (w.jail) {
+      if (now >= w.jail.until) w.jail = null;
+      else {
+        const lean = S * 0.15;
+        w.x = w.jx + Math.max(-1, Math.min(1, ix)) * lean;
+        w.y = w.jy + Math.max(-1, Math.min(1, iy)) * lean;
+        w.vx = w.vy = w.kx = w.ky = 0;
+        if (Math.abs(ix) > 0.06) w.face += ((ix > 0 ? 1 : -1) - w.face) * Math.min(1, dt * 9);
+        tick(w, dt, Math.hypot(ix, iy) * 0.5);
+        return;
+      }
+    }
+
     let mag = Math.hypot(ix, iy);
     if (mag > 1) { ix /= mag; iy /= mag; mag = 1; }
 
@@ -1769,6 +1803,30 @@
   // The wavefront: every cell between where the ring was last frame and where
   // it is now lets go. Only the first few each frame get a real voice —
   // three hundred queued pops would take four seconds to drain.
+  /* A shockfront: everything between where the ring was last frame and where it
+     is now lets go. Only the first few each frame get a real voice — three
+     hundred queued pops would take four seconds to drain. Both the slap and the
+     heart burst travel this way, which is also why they stay in step across
+     machines: same centre, same reach, same easing, so the same cells go. */
+  function crossWave(w, r1, now, loudMax, tint) {
+    const r0 = w.r;
+    if (r1 <= r0) return;
+    w.r = r1;
+    let loud = 0;
+    for (const c of cells) {
+      if (c.st !== 0) continue;
+      const d2 = (c.x - w.x) ** 2 + (c.y - w.y) ** 2;
+      if (d2 < r0 * r0 || d2 > r1 * r1) continue;
+      if (loud++ < loudMax) popCell(c, now, w.mine);
+      else popQuiet(c, now, w.mine);
+      w.n++;
+    }
+    if (!reduced && r1 - w.ring > S * 1.6) {            // the front, drawn where it is
+      w.ring = r1;
+      rings.push({ x: w.x, y: w.y, t: now, life: 430, wave: r1, c: tint });
+    }
+  }
+
   function stepSlap(now) {
     if (!slapFx) return;
     const e = now - slapFx.t0;
@@ -1776,23 +1834,7 @@
     if (!slapFx.hit) { slapFx.hit = true; slapLand(now); }
 
     const p = Math.min(1, (e - SLAP_FALL) / WAVE_MS);
-    const r1 = SLAP_R * easeOut(p), r0 = slapFx.r;
-    if (r1 > r0) {
-      slapFx.r = r1;
-      let loud = 0;
-      for (const c of cells) {
-        if (c.st !== 0) continue;
-        const d2 = (c.x - slapFx.x) ** 2 + (c.y - slapFx.y) ** 2;
-        if (d2 < r0 * r0 || d2 > r1 * r1) continue;
-        if (loud++ < 3) popCell(c, now, slapFx.mine);
-        else popQuiet(c, now, slapFx.mine);
-        slapFx.n++;
-      }
-      if (!reduced && r1 - slapFx.ring > S * 1.6) {      // the front, drawn where it is
-        slapFx.ring = r1;
-        rings.push({ x: slapFx.x, y: slapFx.y, t: now, life: 430, wave: r1 });
-      }
-    }
+    crossWave(slapFx, SLAP_R * easeOut(p), now, 3);
 
     if (p >= 1 && !slapFx.told) {
       slapFx.told = true;
@@ -2134,6 +2176,12 @@
       pairUp();
       return;
     }
+
+    if (m.t === "d") {                                 // their score, mid-duel
+      const p = net.peers.get(m.id) || newPeer(m.id);
+      p.duelPops = Math.max(p.duelPops | 0, m.s | 0);   // a score never walks backwards
+      return;
+    }
   }
 
   function netSend(force) {
@@ -2180,6 +2228,8 @@
         net.peers.delete(id); net.ids.delete(id); paintOnline();
         continue;
       }
+      if (p.jail && now >= p.jail.until) p.jail = null;   // their sentence ends off screen too
+
       const e = Math.min(1, dt * 12);
       const ox = p.x, oy = p.y;
       p.x += (p.tx - p.x) * e;
@@ -2213,13 +2263,13 @@
 
   function collide(now, hosting) {
     const w = walker;
-    if (w.duet) return;                                // hugging is not colliding
+    if (w.duet || w.jail) return;                      // hugging and caged are not colliding
 
     // bumping into a friend does the same thing as bumping into a wanderer.
     // The lower of the two ids owns the pair, so the bang happens once and
     // both of you see the same one.
     for (const [id, p] of net.peers) {
-      if (p.duet) continue;
+      if (p.duet || p.jail) continue;                  // a cage takes the hit for them
       const dx = p.x - w.x, dy = p.y - w.y;
       const d = Math.hypot(dx, dy) || 0.001;
       const sep = S * 1.65;
@@ -2289,7 +2339,8 @@
 
   const EMO = ["❤️", "😭", "😠", "💀"];
   const EMO_MS = 2000;
-  const DUET_REACH = S * 20;                 // further apart than this and the moment has passed
+  const BODY = S * 1.1;                      // one critter, shoulder to shoulder
+  const DUET_REACH = BODY * 3;               // three of those apart, and no further
   const duets = [];
 
   function emote(k) {
@@ -2304,17 +2355,33 @@
     return list;
   }
 
+  /* Pairing measures the freshest position we have, not the one on screen. A
+     peer is drawn where the interpolation has got to, which trails what they
+     actually told us by a frame or two — near the three-body line that is the
+     difference between us pairing and them pairing, and half a hug is worse
+     than none. Both machines reading the reported number keeps them agreeing. */
+  const atX = b => (b.remote && b.placed) ? b.tx : b.x;
+  const atY = b => (b.remote && b.placed) ? b.ty : b.y;
+
+  function emoLive(now) {
+    if (walker.emo && now - walker.emo.t < EMO_MS) return true;
+    for (const [, p] of net.peers) if (p.emo && now - p.emo.t < EMO_MS) return true;
+    return false;
+  }
+
   function pairUp() {
     const now = performance.now();
     for (const kind of ["❤️", "💀"]) {
       const set = bodies().filter(o =>
-        o.b.emo && o.b.emo.k === kind && now - o.b.emo.t < EMO_MS && !o.b.duet && o.b.placed !== 0);
+        o.b.emo && o.b.emo.k === kind && now - o.b.emo.t < EMO_MS
+        && !o.b.duet && !o.b.jail && o.b.placed !== 0);
       if (set.length < 2) continue;
       let best = null, bd = DUET_REACH;
       for (let i = 0; i < set.length; i++) {
         for (let j = i + 1; j < set.length; j++) {
-          const d = Math.hypot(set[i].b.x - set[j].b.x, set[i].b.y - set[j].b.y);
-          if (d < bd) { bd = d; best = [set[i].b, set[j].b]; }
+          const a = set[i].b, b = set[j].b;
+          const d = Math.hypot(atX(a) - atX(b), atY(a) - atY(b));
+          if (d < bd) { bd = d; best = [a, b]; }
         }
       }
       if (best) startDuet(kind, best[0], best[1], now);
@@ -2322,11 +2389,12 @@
   }
 
   function startDuet(kind, a, b, now) {
-    const dx = b.x - a.x, dy = b.y - a.y;
+    const ax = atX(a), ay = atY(a), bx = atX(b), by = atY(b);
+    const dx = bx - ax, dy = by - ay;
     const d = Math.hypot(dx, dy) || 1;
     const D = {
       kind, a, b, t0: now,
-      cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,        // frozen, so it can't drift apart
+      cx: (ax + bx) / 2, cy: (ay + by) / 2,            // frozen, so it can't drift apart
       ux: dx / d, uy: dy / d,
       dur: kind === "❤️" ? 2200 : 2400, jab: 0
     };
@@ -2342,13 +2410,22 @@
     if (D.b) D.b.duet = null;
   }
 
+  // A scene that runs its course pays off; one cut short by somebody closing
+  // their laptop does not. Every client reaches this line off the same events
+  // at the same moment, so the payoff needs no message of its own.
+  function finishDuet(D, now) {
+    endDuet(D);
+    if (D.kind === "❤️") heartBurst(D, now);
+    else startDuel(D, now);
+  }
+
   const APPROACH = 620;
 
   function stepDuets(now, dt) {
     for (let i = duets.length - 1; i >= 0; i--) {
       const D = duets[i];
       const e = now - D.t0;
-      if (e > D.dur) { endDuet(D); continue; }
+      if (e > D.dur) { finishDuet(D, now); continue; }
 
       const gap = D.kind === "❤️" ? S * 0.58 : S * 1.25;
       const ease = easeOut(Math.min(1, e / APPROACH));
@@ -2427,6 +2504,205 @@
       }
     }
     boom((hx - cam.x) * k);
+  }
+
+  /* ══ what a hug leaves behind ════════════════════════════
+     Two hearts don't just hug, they go off: a pink front travels out from the
+     spot they were standing on and takes the sheet with it. Same shockfront the
+     slap uses, so it lands on the same cells on every screen. */
+
+  const HEART_C = "#EE6B8B";
+  const HEART_R = BODY * 9, HEART_MS = 720;
+  const waves = [];
+
+  function heartBurst(D, now) {
+    const cx = D.cx, cy = D.cy;
+    const mine = !D.a.remote || !D.b.remote;         // one of them is me
+    waves.push({ x: cx, y: cy, t0: now, R: HEART_R, ms: HEART_MS,
+                 r: 0, ring: 0, n: 0, mine, tint: HEART_C });
+    heartBloom((cx - cam.x) * k);
+    flash = { x: cx, y: cy, t: now, c: HEART_C };
+    if (!reduced) {
+      shake = Math.max(shake, 1.2);
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * 6.2832, sp = 1.6 + Math.random() * 4.2;
+        parts.push({
+          x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1,
+          r: 2.4 + Math.random() * 2.4, life: 700 + Math.random() * 500,
+          t: now, c: HEART_C, heart: true
+        });
+      }
+    }
+    // it knocks over everyone standing near — except the two it came out of
+    for (const b of [walker, ...npcs, ...net.peers.values()]) {
+      if (b === D.a || b === D.b) continue;
+      const d = Math.hypot(b.x - cx, b.y - cy);
+      const fall = Math.max(0, 1 - d / HEART_R);
+      if (fall <= 0) continue;
+      b.hopV = Math.min(b.hopV, -S * (2.2 + 3 * fall));
+      b.kx += (b.x - cx) / (d || 1) * S * 4 * fall;
+      b.ky += (b.y - cy) / (d || 1) * S * 2.4 * fall;
+    }
+  }
+
+  function stepWaves(now) {
+    for (let i = waves.length - 1; i >= 0; i--) {
+      const w = waves[i];
+      const p = Math.min(1, (now - w.t0) / w.ms);
+      crossWave(w, w.R * easeOut(p), now, 3, w.tint);
+      if (p < 1) continue;
+      countEl.textContent = fmt(pops);                 // the quiet ones never touched it
+      store.set("pops", pops); store.set("exp", exp);
+      if (w.mine) { addXp(30); toast(w.n + " caught in it"); }
+      waves.splice(i, 1);
+    }
+  }
+
+  /* ══ what two skulls start ═══════════════════════════════
+     Ten seconds from the moment they break apart, both of them popping as fast
+     as they can. Whoever pops less is locked on the spot for ten more. Each
+     side counts its own and says the number out loud four times a second;
+     both machines then compare the same two numbers, so both agree on who goes
+     in without anybody refereeing it. */
+
+  const DUEL_MS = 10000, JAIL_MS = 10000, DUEL_GRACE = 500;
+  let duel = null;
+
+  function startDuel(D, now) {
+    const pair = [D.a, D.b];
+    for (const b of pair) b.duelPops = 0;
+    duel = { t0: now, pair, me: pair.find(b => !b.remote) || null, sentAt: 0, told: 0 };
+    if (duel.me) toast("Ten seconds — fewest pops gets locked up");
+    boom((D.cx - cam.x) * k);
+  }
+
+  function stepDuel(now) {
+    if (!duel) return;
+    const e = now - duel.t0;
+
+    if (e < DUEL_MS) {
+      if (duel.me && now - duel.sentAt > 250) {        // say your number out loud
+        duel.sentAt = now;
+        netEvent({ t: "d", s: duel.me.duelPops | 0 });
+      }
+      return;
+    }
+    if (!duel.told) {                                  // time — one last honest number,
+      duel.told = now;                                 // sent whether or not one is due
+      if (duel.me) netEvent({ t: "d", s: duel.me.duelPops | 0 });
+      return;
+    }
+    if (now - duel.told < DUEL_GRACE) return;          // …and time for theirs to land
+
+    const [a, b] = duel.pair;
+    const sa = a.duelPops | 0, sb = b.duelPops | 0;
+    if (sa === sb) {
+      if (duel.me) toast("Dead heat at " + sa + " — nobody goes in");
+    } else {
+      lockUp(sa < sb ? a : b, Math.abs(sa - sb), now, duel.me);
+    }
+    duel = null;
+  }
+
+  function lockUp(b, margin, now, mine) {
+    b.jail = { t0: now, until: now + JAIL_MS };
+    b.jx = b.x; b.jy = b.y;                            // the spot it closes around
+    b.kx = b.ky = 0;
+    rings.push({ x: b.x, y: b.y, t: now, life: 620, big: true });
+    if (!reduced) shake = Math.max(shake, 0.8);
+    clang((b.x - cam.x) * k);
+    if (!b.remote) toast("Locked up — lost by " + margin);
+    else if (mine) toast("Won by " + margin + " — " + (b.name || "they") + " is in");
+  }
+
+  // a cage dropping onto stone
+  function clang(x) {
+    if (!ac) return;
+    try {
+      out = panTo(x);
+      const t = ac.currentTime + 0.001;
+      tone(t, { from: 92, to: 48, sweep: 0.18, gain: 0.7, a: 0.004, d: 0.4 });
+      crack(t, { type: "bandpass", freq: 2400, q: 3, gain: 0.55, knee: 0.3, d: 0.09 });
+      crack(t + 0.02, { type: "bandpass", freq: 3600, q: 5, gain: 0.3, knee: 0.2, d: 0.22 });
+      burst(t + 0.04, { type: "lowpass", freq: 700, q: 1, gain: 0.3, d: 0.26 });
+    } catch (e) { /* silence beats a dead render loop */ }
+    out = master;
+  }
+
+  // over each duellist: what they're on, and how long they have
+  function drawDuel(now) {
+    if (!duel) return;
+    const left = Math.max(0, DUEL_MS - (now - duel.t0));
+    const fs = Math.max(10, Math.round(S * 0.28));
+    g.font = `700 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    for (const b of duel.pair) {
+      if (b.x < cam.x - S * 2 || b.x > cam.x + viewW + S * 2) continue;
+      const label = (b.duelPops | 0) + (b === duel.me ? "   " + Math.ceil(left / 1000) + "s" : "");
+      const wide = g.measureText(label).width + fs * 1.3;
+      const y = b.y + (b.hop || 0) - S * 1.95;
+      rr(g, b.x - wide / 2, y - fs * 0.85, wide, fs * 1.7, fs * 0.85);
+      g.fillStyle = rgba(darkNow ? "#1B1B24" : "#FFFFFF", 0.88);
+      g.fill();
+      g.strokeStyle = rgba("#E5484D", 0.55);
+      g.lineWidth = 1.2;
+      g.stroke();
+      g.fillStyle = darkNow ? "#FFD9DA" : "#B4242A";
+      g.fillText(label, b.x, y);
+    }
+  }
+
+  // two rails and five bars, slammed down over whoever lost
+  function drawCages(now) {
+    for (const b of [walker, ...net.peers.values()]) {
+      if (!b.jail) continue;
+      const left = b.jail.until - now;
+      if (left <= 0) { b.jail = null; continue; }
+      if (b.x < cam.x - S * 3 || b.x > cam.x + viewW + S * 3) continue;
+
+      const u = S * 0.55 * (b.scale || 1);
+      const halfW = u * 1.3, top = -u * 2.3, bot = u * 1.2;
+      const drop = Math.min(1, (now - b.jail.t0) / 260);
+
+      g.save();
+      g.translate(b.x, b.y);
+      g.fillStyle = rgba("#000000", darkNow ? 0.34 : 0.15);
+      g.beginPath(); g.ellipse(0, bot, halfW * 1.05, u * 0.2, 0, 0, 6.2832); g.fill();
+
+      g.save();
+      g.translate(0, -(1 - drop) * VH * 0.6);          // comes down from off screen
+      g.globalAlpha = 0.94;
+      g.strokeStyle = darkNow ? "#A6A6BA" : "#494958";
+      g.lineCap = "round";
+      g.lineWidth = Math.max(1.6, S * 0.05);
+      for (let i = 0; i <= 3; i++) {                   // four, so the face sits in a gap
+        const bx = -halfW + halfW * 2 * (i / 3);
+        g.beginPath(); g.moveTo(bx, top); g.lineTo(bx, bot); g.stroke();
+      }
+      g.lineWidth = Math.max(2.2, S * 0.075);
+      for (const ry of [top, top + (bot - top) * 0.52, bot]) {
+        g.beginPath(); g.moveTo(-halfW, ry); g.lineTo(halfW, ry); g.stroke();
+      }
+      g.restore();
+
+      const fs = Math.max(9, Math.round(S * 0.26));    // the countdown, on the floor
+      g.font = `700 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      const t = Math.ceil(left / 1000) + "s";
+      const wide = g.measureText(t).width + fs * 1.4;
+      const ty = bot + u * 0.72;
+      rr(g, -wide / 2, ty - fs * 0.85, wide, fs * 1.7, fs * 0.85);
+      g.fillStyle = rgba(darkNow ? "#16161E" : "#FFFFFF", 0.88);
+      g.fill();
+      g.strokeStyle = rgba("#E5484D", 0.5);
+      g.lineWidth = 1.2;
+      g.stroke();
+      g.fillStyle = "#E5484D";
+      g.fillText(t, 0, ty);
+      g.restore();
+    }
   }
 
   // the face over your head, and the hearts over a hug
@@ -2755,9 +3031,14 @@
     if (hosting) { for (const n of npcs) stepNpc(n, now, dt); }
     else { for (const n of npcs) stepNpcRemote(n, now, dt); }
     stepPeers(now, dt);
+    // a pair can come together a beat after the second face goes up — positions
+    // land twelve times a second, so keep looking while the faces are still up
+    if (emoLive(now)) pairUp();
     stepDuets(now, dt);
     if (walker.on) collide(now, hosting);
     stepSlap(now);
+    stepWaves(now);
+    stepDuel(now);
     netSend(false);
     if (hosting) netNpcs();
 
@@ -2850,8 +3131,10 @@
     for (const n of npcs) if (n.placed) drawCritter(n);
     for (const [, p] of net.peers) drawCritter(p);
     if (walker.on) drawCritter(walker);
+    drawCages(now);                           // bars go in front of whoever is behind them
     drawPeerTags();
     drawEmotes(now);
+    drawDuel(now);
     drawBridgeFront();
 
     // rings
@@ -2867,7 +3150,7 @@
           : 0.34 + easeOut(p) * 0.8);
       g.beginPath();
       g.arc(r.x, r.y, rad, 0, 6.2832);
-      g.strokeStyle = rgba(PACKS[nearestZone(r.x)].accent,
+      g.strokeStyle = rgba(r.c || PACKS[nearestZone(r.x)].accent,
         (1 - p) * (r.wave ? 0.55 : r.big ? 0.8 : r.stomp ? 0.9 : 0.5));
       g.lineWidth = (r.wave ? 6 : r.big ? 4 : r.stomp ? 5 : 2) * (1 - p) + 0.4;
       g.stroke();
@@ -2877,10 +3160,10 @@
       const p = (now - flash.t) / 300;
       if (p >= 1) flash = null;
       else {
-        const rad = S * 2.8;
+        const rad = S * 2.8, fc = flash.c || pack.accent;
         const fg = g.createRadialGradient(flash.x, flash.y, 0, flash.x, flash.y, rad);
-        fg.addColorStop(0, rgba(pack.accent, (1 - p) * 0.42));
-        fg.addColorStop(1, rgba(pack.accent, 0));
+        fg.addColorStop(0, rgba(fc, (1 - p) * 0.42));
+        fg.addColorStop(1, rgba(fc, 0));
         g.fillStyle = fg;
         g.fillRect(flash.x - rad, flash.y - rad, rad * 2, rad * 2);
       }
