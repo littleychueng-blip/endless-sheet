@@ -290,8 +290,9 @@
     font-size: 15px; line-height: 1;
     cursor: pointer;
   }
-  .step button:hover { color: var(--ink); background: color-mix(in oklab, var(--accent) 18%, transparent); }
+  .step button:hover:not(:disabled) { color: var(--ink); background: color-mix(in oklab, var(--accent) 18%, transparent); }
   .step button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .step button:disabled { opacity: .3; cursor: not-allowed; }
   .step output {
     min-width: 22px; text-align: center;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -409,46 +410,35 @@
   }
   #toast.show { opacity: 1; transform: translate(-50%, -16px); }
 
-  /* ── joystick ─────────────────────────────────────────── */
-  #stick {
+  /* ── emote rail ───────────────────────────────────────── */
+  #emo {
     position: fixed;
-    left: 20px;
-    bottom: calc(env(safe-area-inset-bottom) + 108px);
+    right: 20px;
+    bottom: calc(env(safe-area-inset-bottom) + 196px);
     z-index: 3;
-    width: 118px;
-    height: 118px;
-    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  #emo button {
+    width: 46px;
+    height: 46px;
+    padding: 0;
     border: 1px solid var(--hairline);
+    border-radius: 50%;
     background: var(--surface);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    display: grid;
-    place-items: center;
-    touch-action: none;
-    cursor: grab;
-    transition: border-color 180ms ease;
-  }
-  #stick[hidden] { display: none; }
-  #stick.gripped { cursor: grabbing; border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
-  #stick::after {
-    content: "";
-    position: absolute;
-    inset: 15px;
-    border-radius: 50%;
-    border: 1px dashed color-mix(in oklab, var(--ink) 14%, transparent);
-  }
-
-  #knob {
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    background: color-mix(in oklab, var(--accent) 82%, var(--surface-2));
-    border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
     box-shadow: var(--shadow);
-    transition: transform 200ms cubic-bezier(.2,1.5,.4,1), background 500ms ease;
-    will-change: transform;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform 160ms cubic-bezier(.2,1.5,.4,1), border-color 180ms ease;
   }
-  #stick.gripped #knob { transition: background 500ms ease; }
+  #emo button:hover { border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
+  #emo button:active { transform: scale(.88); }
+  #emo button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
   /* ── the slap ─────────────────────────────────────────── */
   #slap {
@@ -633,7 +623,8 @@
     #vol label { display: none; }
     #gear { padding: 9px 11px; font-size: 0; letter-spacing: 0; gap: 0; }
     #gear svg { width: 15px; height: 15px; }
-    #stick { left: 16px; width: 108px; height: 108px; }
+    #emo { right: 16px; bottom: calc(env(safe-area-inset-bottom) + 186px); gap: 6px; }
+    #emo button { width: 42px; height: 42px; font-size: 20px; }
     #panel { left: 14px; right: 14px; width: auto; }
     #bar { width: 64px; }
   }
@@ -643,7 +634,7 @@
 <canvas id="sheet" aria-label="Sheet of bubbles. Tap, drag, or press any key to pop." role="img"></canvas>
 <div id="scrim"></div>
 
-<div id="hint"><span>Tap to pop. Walk right to find the bridge.</span></div>
+<div id="hint"><span>Drag anywhere to walk. Tap to pop. Head right for the bridge.</span></div>
 
 <div id="hud">
   <div id="mark" class="mono">Endless&nbsp;Sheet</div>
@@ -679,10 +670,10 @@
   </div>
   <div class="row">
     <span class="lbl">Wanderers</span>
-    <div class="step">
-      <button id="npcDown" type="button" aria-label="Fewer wanderers">&minus;</button>
-      <output id="npcN" for="npcDown npcUp">3</output>
-      <button id="npcUp" type="button" aria-label="More wanderers">+</button>
+    <div class="step" title="Fixed at 5 — everyone online has to see the same crowd">
+      <button id="npcDown" type="button" disabled aria-label="Fewer wanderers">&minus;</button>
+      <output id="npcN" for="npcDown npcUp">5</output>
+      <button id="npcUp" type="button" disabled aria-label="More wanderers">+</button>
     </div>
   </div>
   <div class="row">
@@ -723,7 +714,7 @@
   </form>
 </div>
 
-<div id="stick" aria-hidden="true"><div id="knob"></div></div>
+<div id="emo" role="group" aria-label="Emotes"></div>
 
 <button id="slap" type="button" aria-label="Slap the whole screen">
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1081,9 +1072,6 @@
   let exp = parseInt(store.get("exp", "0"), 10) || 0;
   let level = Math.floor(exp / PER_LEVEL) + 1;
 
-  let npcWant = parseInt(store.get("npc", "-1"), 10);
-  if (!(npcWant >= 0)) npcWant = -1;                   // -1 until the first layout sizes it
-
   const look = {
     body: store.get("body", "auto"),
     hat: store.get("hat", "none"),
@@ -1107,7 +1095,8 @@
     step: 0, face: 1, blink: 0, nextBlink: 1800,
     scale: 1, belt: true, cool: 0
   };
-  const stick = { dx: 0, dy: 0, id: null };
+  // not a widget any more — just where the finger went down and how far it's pulled
+  const stick = { dx: 0, dy: 0, id: null, ox: 0, oy: 0, moved: false };
   const keyVec = { x: 0, y: 0 };
   let running = false;                       // Shift, or the stick pushed to the rim
 
@@ -1127,7 +1116,20 @@
 
   const cvs = document.getElementById("sheet");
   const g = cvs.getContext("2d");
-  let W = 0, H = 0, dpr = 1, S = 56, cells = [], sprScale = 1.7;
+
+  /* The world has a fixed size in its own units and the camera scales it to
+     fit the height of whatever screen it lands on. That is what lets two
+     players agree on anything: the grid, the zones and the bridges come out
+     identical on a phone and on a laptop, so cell #4271 is the same bubble
+     everywhere and a position can travel as a plain pair of numbers. */
+  const S = 56;                     // one cell, in world units
+  const VH = 1000;                  // world height, in world units
+  const sprScale = 1.7;
+
+  let W = 0, H = 0, dpr = 1;
+  let k = 1;                        // world units → screen pixels
+  let viewW = 0;                    // how much world the viewport spans
+  let cells = [];
 
   // one sprite pair per zone, so a bridge can show both sides at once
   const sprites = [], sockets = [];
@@ -1137,7 +1139,9 @@
      Everything is drawn in world coordinates and the camera
      translates once per frame, so nothing downstream has to know. */
 
-  let zoneW = 0, bridgeW = 0, worldW = 0, zone = 0;
+  const zoneW = S * 26, bridgeW = S * 6.5;
+  const worldW = PACKS.length * zoneW + (PACKS.length - 1) * bridgeW;
+  let zone = 0;
   const cam = { x: 0 };
 
   const zoneStart = i => i * (zoneW + bridgeW);
@@ -1169,11 +1173,12 @@
   }
 
   function makeSprite(draw) {
-    const px = Math.ceil(S * sprScale * dpr);
+    const res = dpr * Math.max(0.4, k);        // the camera scale is part of the pixel budget
+    const px = Math.ceil(S * sprScale * res);
     const c = document.createElement("canvas");
     c.width = c.height = px;
     const x = c.getContext("2d");
-    x.scale(dpr, dpr);
+    x.scale(res, res);
     x.translate(S * sprScale / 2, S * sprScale / 2);
     draw(x, S / 2);
     return c;
@@ -1298,18 +1303,9 @@
     }));
   }
 
-  function layout() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
-    cvs.width = Math.round(W * dpr); cvs.height = Math.round(H * dpr);
-    cvs.style.width = W + "px"; cvs.style.height = H + "px";
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    S = Math.max(38, Math.min(68, Math.hypot(W, H) / 21));
-    zoneW = Math.max(W * 1.25, S * 16);
-    bridgeW = S * 6.5;
-    worldW = PACKS.length * zoneW + (PACKS.length - 1) * bridgeW;
-
+  // The grid never changes shape, so it is built once and survives every
+  // resize — which also means a cell keeps its index for the whole session.
+  function buildCells() {
     cells = [];
     for (let i = 0; i < PACKS.length; i++) {
       const P = PACKS[i];
@@ -1319,22 +1315,38 @@
       const stepY = S * (hex ? 0.9 : pitch);
       const x0 = zoneStart(i), x1 = zoneEnd(i);
       const cols = Math.ceil((x1 - x0) / stepX);
-      const rows = Math.ceil(H / stepY) + 2;
-      const offY = (H - (rows - 1) * stepY) / 2;
+      const rows = Math.ceil(VH / stepY) + 2;
+      const offY = (VH - (rows - 1) * stepY) / 2;
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const x = x0 + stepX * 0.5 + c * stepX + (hex && r % 2 ? stepX / 2 : 0);
           const y = offY + r * stepY;
-          if (x > x1 - stepX * 0.2 || y < -S || y > H + S) continue;
-          cells.push({ x, y, z: i, st: 0, t: 0, wait: 0 });
+          if (x > x1 - stepX * 0.2 || y < -S || y > VH + S) continue;
+          const idx = cells.length;
+          // how long this cell stays flat is a property of the cell, not a
+          // coin flip — otherwise two screens would refill at different times
+          cells.push({ x, y, z: i, st: 0, t: 0, idx, wait: 1500 + (idx * 2654435761 >>> 0) % 2800 });
         }
       }
     }
+  }
 
-    if (!walker.x) { walker.x = zoneStart(0) + zoneW / 2; walker.y = H * 0.5; }
+  function layout() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cvs.width = Math.round(W * dpr); cvs.height = Math.round(H * dpr);
+    cvs.style.width = W + "px"; cvs.style.height = H + "px";
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    k = H / VH;                              // the world always fills the height exactly
+    viewW = W / k;
+
+    if (!cells.length) buildCells();
+
+    if (!walker.x) { walker.x = zoneStart(0) + zoneW / 2; walker.y = VH * 0.5; }
     walker.x = Math.min(Math.max(walker.x, S * 0.44), worldW - S * 0.44);
-    walker.y = Math.min(Math.max(walker.y, S * 0.44), H - S * 0.44);
-    cam.x = Math.min(Math.max(walker.x - W / 2, 0), Math.max(0, worldW - W));
+    walker.y = Math.min(Math.max(walker.y, S * 0.44), VH - S * 0.44);
+    cam.x = Math.min(Math.max(walker.x - viewW / 2, 0), Math.max(0, worldW - viewW));
 
     buildSprites();
     enterZone(nearestZone(walker.x));        // keeps the readout honest after a resize
@@ -1409,7 +1421,7 @@
     fanfare();
     lvlEl.classList.add("up");
     setTimeout(() => lvlEl.classList.remove("up"), 260);
-    const cx = walker.on ? walker.x : W / 2, cy = walker.on ? walker.y : H / 2;
+    const cx = walker.on ? walker.x : cam.x + viewW / 2, cy = walker.on ? walker.y : VH / 2;
     rings.push({ x: cx, y: cy, t: performance.now(), life: 700, big: true });
     if (!reduced) {
       for (let i = 0; i < 22; i++) {
@@ -1431,17 +1443,21 @@
     paintXp();
   }
 
-  function popCell(c, now) {
+  // `mine` false means somebody else caused this pop: it still sounds and
+  // still clears the cell, it just doesn't go on your tab.
+  function popCell(c, now, mine) {
+    if (c.st !== 0) return;                   // events can arrive twice; a popped cell stays popped
     const P = PACKS[c.z];                     // a cell sounds like the zone it belongs to
     c.st = 1; c.t = now;
     burstFx(c.x, c.y, P);
-    play(c.x - cam.x, P.id);                  // panned by where it is on screen
+    play((c.x - cam.x) * k, P.id);            // panned by where it is on screen
+    if (mine === false) return;
     pops++;
     countEl.textContent = fmt(pops);
     countEl.classList.add("tick");
     setTimeout(() => countEl.classList.remove("tick"), 90);
     addXp(1);
-    if (charging) slapCharge = Math.min(SLAP_AT, slapCharge + 1);
+    if (!slapFx) slapCharge = Math.min(SLAP_AT, slapCharge + 1);   // the slap can't refill itself
     if (pops % 10 === 0) {
       store.set("pops", pops); store.set("exp", exp); store.set("slap", slapCharge);
       paintSlap();
@@ -1450,17 +1466,25 @@
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
+  function popQuiet(c, now, mine) {
+    if (c.st !== 0) return;
+    c.st = 1; c.t = now;
+    if (mine === false) return;
+    pops++;
+    addXp(1);
+  }
+
   function hit(px, py) {
     const now = performance.now();
-    const wx = px + cam.x;                    // screen to world
+    const wx = px / k + cam.x, wy = py / k;   // screen to world
     let best = null, bd = (S * 1.05) ** 2;
     for (const c of cells) {
       if (c.st !== 0) continue;
-      const d = (c.x - wx) ** 2 + (c.y - py) ** 2;
+      const d = (c.x - wx) ** 2 + (c.y - wy) ** 2;
       if (d < bd) { bd = d; best = c; }
     }
-    if (best) popCell(best, now);
-    else rings.push({ x: wx, y: py, t: now, life: 300 });   // nothing left there — still answer the touch
+    if (best) { popCell(best, now); netEvent({ t: "p", i: best.idx }); }
+    else rings.push({ x: wx, y: wy, t: now, life: 300 });   // nothing left there — still answer the touch
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
@@ -1469,37 +1493,39 @@
   const npcs = [];
   let shake = 0, flash = null;
 
-  const NPC_MAX = 10;
+  // Fixed, and deliberately so: online everyone has to see the same crowd,
+  // so the count is no longer yours to set.
+  const NPC_N = 5;
+
+  function makeNpc() {
+    return {
+      x: 0, y: 0, z: -1,
+      vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0,
+      hx: 0, hy: 0, tx: 0, ty: 0, turn: 0, cool: 0,
+      rx: 0, ry: 0, rhop: 0, rface: 1, moving: 0, placed: 0,
+      step: Math.random() * 6, face: 1, blink: 0, nextBlink: 1200 + Math.random() * 3400,
+      scale: 0.8, belt: false
+    };
+  }
 
   function fitNpcs() {
-    if (npcWant < 0 && W) {                            // first run: size it to the screen
-      npcWant = Math.max(2, Math.min(5, Math.round(W * H / 300000)));
-      store.set("npc", npcWant);
-    }
-    const want = Math.max(0, Math.min(NPC_MAX, npcWant < 0 ? 0 : npcWant));
-    if (npcEl) npcEl.textContent = String(want);
-    while (npcs.length > want) npcs.pop();
-    while (npcs.length < want) {
-      npcs.push({
-        x: 0, y: 0, z: zone,
-        vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0,
-        hx: 0, hy: 0, tx: 0, ty: 0, turn: 0, cool: 0,
-        step: Math.random() * 6, face: 1, blink: 0, nextBlink: 1200 + Math.random() * 3400,
-        scale: 0.8, belt: false
-      });
-      npcs[npcs.length - 1].z = -1;                    // forces a placement below
-    }
-    // they live in whichever zone you're standing in, so the world around you
-    // is always inhabited without simulating five empty zones
+    while (npcs.length > NPC_N) npcs.pop();
+    while (npcs.length < NPC_N) npcs.push(makeNpc());
+    if (npcEl) npcEl.textContent = String(NPC_N);
+    if (!isHost()) return;                             // the host says where they are
+
+    // they live in whichever zone the host is standing in, so the world is
+    // inhabited where the action is without simulating five empty zones
     const pad = S * 0.5;
     for (const n of npcs) {
       if (n.z !== zone) {
         n.z = zone;
         n.x = zoneStart(zone) + pad + Math.random() * Math.max(1, zoneW - pad * 2);
-        n.y = pad + Math.random() * Math.max(1, H - pad * 2);
+        n.y = pad + Math.random() * Math.max(1, VH - pad * 2);
+        n.placed = 1;
       }
       n.x = Math.min(Math.max(n.x, zoneStart(n.z) + pad), zoneEnd(n.z) - pad);
-      n.y = Math.min(Math.max(n.y, pad), H - pad);
+      n.y = Math.min(Math.max(n.y, pad), VH - pad);
     }
   }
 
@@ -1517,12 +1543,12 @@
     }
   }
 
-  function trample(c, now, reach, heavy) {
+  function trample(c, now, reach, heavy, mine) {
     const r2 = reach * reach;
     for (const cell of cells) {
       if (cell.st !== 0) continue;
       if ((cell.x - c.x) ** 2 + (cell.y - c.y) ** 2 >= r2) continue;
-      popCell(cell, now);
+      popCell(cell, now, mine);
       if (heavy) stompFx(cell, c);
     }
   }
@@ -1578,10 +1604,11 @@
   function stepWalker(now, dt) {
     const w = walker;
     let ix = stick.dx + keyVec.x, iy = stick.dy + keyVec.y;
+    if (w.duet) ix = iy = 0;                    // a hug drives you; you don't
     let mag = Math.hypot(ix, iy);
     if (mag > 1) { ix /= mag; iy /= mag; mag = 1; }
 
-    // Shift on a keyboard, or the stick shoved to the rim on a phone
+    // Shift on a keyboard, or the drag pushed past the rim on a phone
     const runMul = (running || Math.hypot(stick.dx, stick.dy) > 0.85) ? 2 : 1;
     const speed = S * 3.1 * runMul;
     w.vx = ix * speed + w.kx; w.vy = iy * speed + w.ky;
@@ -1589,7 +1616,7 @@
 
     const pad = S * 0.44;
     w.x = Math.min(Math.max(w.x, pad), worldW - pad);
-    w.y = Math.min(Math.max(w.y, pad), H - pad);
+    w.y = Math.min(Math.max(w.y, pad), VH - pad);
 
     // a locked bridge stops you at the barrier
     for (let i = 1; i < PACKS.length; i++) {
@@ -1604,7 +1631,7 @@
     // on a bridge you walk the deck, not the void
     if (zoneAt(w.x) < 0) {
       const b = BAND();
-      w.y = Math.min(Math.max(w.y, H / 2 - b), H / 2 + b);
+      w.y = Math.min(Math.max(w.y, VH / 2 - b), VH / 2 + b);
     }
 
     if (Math.abs(ix) > 0.06) w.face += ((ix > 0 ? 1 : -1) - w.face) * Math.min(1, dt * 9);
@@ -1616,7 +1643,7 @@
 
     // trample what it walks over — only while actually moving, so standing
     // still doesn't turn into a machine gun as the cells refill underneath
-    if (mag > 0.02 || Math.hypot(w.kx, w.ky) > S) trample(w, now, S * 0.56, true);
+    if (mag > 0.02 || Math.hypot(w.kx, w.ky) > S) trample(w, now, S * 0.56, true, true);
 
     const z = zoneAt(w.x);
     if (z >= 0 && z !== zone) enterZone(z);
@@ -1644,18 +1671,37 @@
     if (n.x < lo) { n.x = lo; n.tx = n.hx = Math.abs(n.hx) + 0.2; }
     if (n.x > hi) { n.x = hi; n.tx = n.hx = -Math.abs(n.hx) - 0.2; }
     if (n.y < pad) { n.y = pad; n.ty = n.hy = Math.abs(n.hy) + 0.2; }
-    if (n.y > H - pad) { n.y = H - pad; n.ty = n.hy = -Math.abs(n.hy) - 0.2; }
+    if (n.y > VH - pad) { n.y = VH - pad; n.ty = n.hy = -Math.abs(n.hy) - 0.2; }
 
     const mag = Math.min(1, Math.hypot(n.hx, n.hy));
+    n.moving = mag > 0.05 ? 1 : 0;
     if (Math.abs(n.vx) > S * 0.2) n.face += ((n.vx > 0 ? 1 : -1) - n.face) * Math.min(1, dt * 7);
     tick(n, dt, mag);
 
-    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) trample(n, now, S * 0.46, false);
+    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) trample(n, now, S * 0.46, false, true);
+  }
+
+  // Everyone but the host is watching a recording: slide the wanderer toward
+  // the position the host last reported and let the rest of the code treat it
+  // exactly like a local one — including trampling, so the sheet matches.
+  function stepNpcRemote(n, now, dt) {
+    if (!n.placed) return;
+    const e = Math.min(1, dt * 12);
+    const ox = n.x, oy = n.y;
+    n.x += (n.rx - n.x) * e;
+    n.y += (n.ry - n.y) * e;
+    n.hop += (n.rhop - n.hop) * e;
+    n.vx = dt > 0 ? (n.x - ox) / dt : 0;
+    n.vy = dt > 0 ? (n.y - oy) / dt : 0;
+    n.face += (n.rface - n.face) * Math.min(1, dt * 7);
+    n.z = nearestZone(n.x);
+    tick(n, dt, n.moving ? 0.6 : 0);
+    if (n.moving) trample(n, now, S * 0.46, false, true);
   }
 
   // a collision is a small event: shove them two bodies apart, then blow
   // the surrounding cells outward from the point of contact
-  function blast(x, y, now) {
+  function blast(x, y, now, mine) {
     flash = { x, y, t: now };
     if (!reduced) shake = 1;
     rings.push({ x, y, t: now, life: 560, big: true });
@@ -1668,157 +1714,261 @@
       if (d2 < R * R) near.push([d2, c]);
     }
     near.sort((a, b) => a[0] - b[0]);        // pops ring outward from the middle
-    for (const p of near) popCell(p[1], now);
-    boom(x);
+    for (const p of near) popCell(p[1], now, mine);
+    boom((x - cam.x) * k);
+    if (mine === false) return;
     addXp(25);                               // a collision is worth more than the cells it clears
     if (navigator.vibrate) navigator.vibrate([12, 24, 18]);
   }
 
   /* ══ the slap ════════════════════════════════════════════
-     500 pops buys one. A hand comes down over the whole viewport,
-     flattens every item on screen, and throws everyone off the ground. */
+     500 pops buys one. A hand comes down where you're standing, holds for a
+     beat, and lifts to reveal the sheet letting go in a ring travelling out
+     from the point of impact. The ripple is what sells the weight — a whole
+     screen popping at once reads as a bug, not a blow. */
 
-  const SLAP_FALL = 380, SLAP_LIFT = 420;
-
-  let charging = true;                         // the slap's own pops don't refill it
+  const SLAP_FALL = reduced ? 0 : 380, SLAP_HOLD = 200, SLAP_LIFT = 440;
+  const WAVE_MS = reduced ? 240 : 700;
+  const SLAP_R = S * 13;              // the reach, in world units — the same for everyone
 
   function fireSlap() {
     if (slapFx || slapCharge < SLAP_AT) return;
-    slapFx = { t0: performance.now(), x: cam.x + W / 2, y: H * 0.52, hit: true };
+    const x = walker.on ? walker.x : cam.x + viewW / 2;
+    const y = walker.on ? walker.y : VH * 0.52;
     slapCharge = 0;
     store.set("slap", 0);
     paintSlap();
-    try { net.ws && net.ws.readyState === 1 && net.ws.send(JSON.stringify({ t: "slap" })); } catch (e) {}
-    if (reduced) { slapLand(); slapFx = null; return; }   // no theatrics, just the result
-    slapFx.hit = false;
+    startSlap(x, y, true);
+    netEvent({ t: "k", x: Math.round(x), y: Math.round(y) });
   }
 
-  // everything the camera can see, popped from the middle outward
-  function popAll(cx, cy, now) {
-    const vx0 = cam.x - S, vx1 = cam.x + W + S;
-    const near = [];
-    for (const c of cells) {
-      if (c.st !== 0 || c.x < vx0 || c.x > vx1) continue;
-      near.push([(c.x - cx) ** 2 + (c.y - cy) ** 2, c]);
+  function startSlap(x, y, mine) {
+    if (slapFx) return;
+    slapFx = { t0: performance.now(), x, y, mine: !!mine, hit: false, r: 0, ring: 0, n: 0 };
+  }
+
+  // The wavefront: every cell between where the ring was last frame and where
+  // it is now lets go. Only the first few each frame get a real voice —
+  // three hundred queued pops would take four seconds to drain.
+  function stepSlap(now) {
+    if (!slapFx) return;
+    const e = now - slapFx.t0;
+    if (e < SLAP_FALL) return;
+    if (!slapFx.hit) { slapFx.hit = true; slapLand(now); }
+
+    const p = Math.min(1, (e - SLAP_FALL) / WAVE_MS);
+    const r1 = SLAP_R * easeOut(p), r0 = slapFx.r;
+    if (r1 > r0) {
+      slapFx.r = r1;
+      let loud = 0;
+      for (const c of cells) {
+        if (c.st !== 0) continue;
+        const d2 = (c.x - slapFx.x) ** 2 + (c.y - slapFx.y) ** 2;
+        if (d2 < r0 * r0 || d2 > r1 * r1) continue;
+        if (loud++ < 3) popCell(c, now, slapFx.mine);
+        else popQuiet(c, now, slapFx.mine);
+        slapFx.n++;
+      }
+      if (!reduced && r1 - slapFx.ring > S * 1.6) {      // the front, drawn where it is
+        slapFx.ring = r1;
+        rings.push({ x: slapFx.x, y: slapFx.y, t: now, life: 430, wave: r1 });
+      }
     }
-    near.sort((a, b) => a[0] - b[0]);
-    // only the closest handful get the full treatment — 300 voices would take
-    // four seconds to drain and bury the machine in particles
-    charging = false;
-    for (let i = 0; i < near.length; i++) {
-      if (i < 48) popCell(near[i][1], now);
-      else popQuiet(near[i][1], now);
+
+    if (p >= 1 && !slapFx.told) {
+      slapFx.told = true;
+      countEl.textContent = fmt(pops);                   // the quiet ones never touched it
+      store.set("pops", pops); store.set("exp", exp);
+      if (slapFx.mine) { addXp(40); toast(slapFx.n + " flattened"); }
     }
-    charging = true;
-    countEl.textContent = fmt(pops);            // the quiet ones never touched it
-    store.set("pops", pops);
-    store.set("exp", exp);
-    return near.length;
+    if (p >= 1 && e > SLAP_FALL + SLAP_HOLD + SLAP_LIFT) slapFx = null;
   }
 
-  function popQuiet(c, now) {
-    c.st = 1; c.t = now;
-    pops++;
-    addXp(1);
-  }
-
-  function slapLand() {
-    const now = performance.now();
-    const cx = slapFx ? slapFx.x : cam.x + W / 2;
-    const cy = slapFx ? slapFx.y : H * 0.52;
-
-    const n = popAll(cx, cy, now);
+  function slapLand(now) {
+    const cx = slapFx.x, cy = slapFx.y;
     slapSound();
+    rings.push({ x: cx, y: cy, t: now, life: 540, big: true });
 
     if (!reduced) {
       shake = 1.8;
-      for (let i = 0; i < 3; i++) rings.push({ x: cx, y: cy, t: now + i * 110, life: 720, big: true });
       flash = { x: cx, y: cy, t: now };
       for (let i = 0; i < 30; i++) {           // dust thrown out along the ground
-        const a = Math.random() * 6.2832;
-        const sp = (1.5 + Math.random() * 4) * (S / 56);
+        const a = Math.random() * 6.2832, sp = 1.5 + Math.random() * 4;
         parts.push({
-          x: cx + (Math.random() - 0.5) * W * 0.8, y: cy + (Math.random() - 0.5) * S,
+          x: cx + (Math.random() - 0.5) * S * 5, y: cy + (Math.random() - 0.5) * S,
           vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.4 - 0.6,
           r: 2 + Math.random() * 3.4, life: 520 + Math.random() * 420,
           t: now, c: darkNow ? "#8E8CA0" : "#9C9AAE", soft: true
         });
       }
-    } else {
-      rings.push({ x: cx, y: cy, t: now, life: 500, big: true });
     }
 
-    // everyone gets thrown — closer to the palm means higher
+    // whoever is standing near it goes up. Peers are thrown on their own
+    // machines and arrive here already airborne.
     for (const c of [walker, ...npcs]) {
       const d = Math.hypot(c.x - cx, c.y - cy);
-      const fall = Math.max(0, 1 - d / (W * 0.75));
-      c.hopV = -S * (5.5 + 3.5 * fall);
+      const fall = Math.max(0, 1 - d / SLAP_R);
+      if (fall <= 0) continue;
+      c.hopV = -S * (4 + 4.5 * fall);
       const ux = (c.x - cx) / (d || 1), uy = (c.y - cy) / (d || 1);
       c.kx += ux * S * 5 * fall;
       c.ky += uy * S * 3 * fall;
     }
-
-    addXp(40);
-    toast(n + " flattened");
-    if (navigator.vibrate) navigator.vibrate([30, 40, 60]);
+    if (slapFx.mine && navigator.vibrate) navigator.vibrate([30, 40, 60]);
   }
 
-  // a flat hand, fingers spread, seen from underneath
-  function drawPalm(cx, cy, scale, alpha) {
-    const u = Math.max(W, H) * 0.42 * scale;
-    g.save();
-    g.translate(cx, cy);
-    g.globalAlpha = alpha;
-    g.fillStyle = rgba(darkNow ? "#07070B" : "#1A1A24", 0.82);
+  /* The hand is drawn once into its own canvas and stamped from there. It has
+     to be: the fingers, the knuckles and the thumb overlap, so fading a live
+     path would show every seam through itself. */
 
-    rr(g, -u * 0.62, -u * 0.5, u * 1.24, u * 1.05, u * 0.34);   // palm
-    g.fill();
-    for (let i = 0; i < 4; i++) {                               // fingers
-      const fx = -u * 0.47 + i * u * 0.31;
-      const len = u * (i === 0 || i === 3 ? 0.72 : 0.88);
-      rr(g, fx - u * 0.13, -u * 0.5 - len, u * 0.26, len + u * 0.2, u * 0.13);
-      g.fill();
+  const SKIN = { lit: "#F5CBAA", mid: "#E3A97F", low: "#C1815A", deep: "#98593B", nail: "#F8DDC9" };
+  const skin = c => darkNow ? mix(c, "#0B0B12", 0.32) : c;
+  const HAND_W = 2.0, HAND_H = 3.0, HAND_OX = 1.0, HAND_OY = 1.55;   // in units of u
+  // index, middle, ring, little: x offset, fan angle, width, length
+  const FINGERS = [[-0.42, -0.13, 0.25, 0.92], [-0.14, -0.04, 0.265, 1.03],
+                   [0.14, 0.06, 0.25, 0.95], [0.40, 0.17, 0.215, 0.74]];
+  let handCvs = null, handDark = null;
+
+  function handSprite() {
+    if (handCvs && handDark === darkNow) return handCvs;
+    const u = 240, res = Math.min(2, window.devicePixelRatio || 1);
+    const c = document.createElement("canvas");
+    c.width = Math.ceil(u * HAND_W * res);
+    c.height = Math.ceil(u * HAND_H * res);
+    const x = c.getContext("2d");
+    x.scale(res, res);
+    x.translate(u * HAND_OX, u * HAND_OY);
+    paintHand(x, u);
+    handCvs = c; handDark = darkNow;
+    return c;
+  }
+
+  // The back of a hand, lit from the top left like everything else here.
+  function paintHand(x, u) {
+    const grad = x.createLinearGradient(-u * 0.8, -u * 1.2, u * 0.9, u * 1.2);
+    grad.addColorStop(0, skin(SKIN.lit));
+    grad.addColorStop(0.45, skin(SKIN.mid));
+    grad.addColorStop(1, skin(SKIN.low));
+    const edge = rgba(skin(SKIN.deep), 0.5);
+
+    x.lineJoin = "round";
+    x.lineCap = "round";
+
+    const digit = (px, py, w, len, tilt) => {
+      x.save();
+      x.translate(px, py);
+      x.rotate(tilt);
+      x.fillStyle = grad;
+      rr(x, -w / 2, -len, w, len + w, w / 2);
+      x.fill();
+      x.lineWidth = u * 0.012;
+      x.strokeStyle = edge;
+      x.stroke();
+      x.strokeStyle = rgba(skin(SKIN.deep), 0.26);              // knuckle creases
+      x.lineWidth = u * 0.011;
+      for (const f of [0.36, 0.66]) {
+        x.beginPath();
+        x.moveTo(-w * 0.34, -len * f); x.lineTo(w * 0.34, -len * f);
+        x.stroke();
+      }
+      x.fillStyle = rgba(skin(SKIN.nail), 0.92);                // nail, foreshortened
+      rr(x, -w * 0.28, -len + w * 0.16, w * 0.56, len * 0.2, w * 0.2);
+      x.fill();
+      x.restore();
+    };
+
+    x.fillStyle = grad;                                          // wrist, behind everything
+    rr(x, -u * 0.34, u * 0.3, u * 0.68, u * 1.1, u * 0.2);
+    x.fill();
+
+    for (const f of FINGERS) digit(f[0] * u, -u * 0.3, f[2] * u, f[3] * u, f[1]);
+
+    x.beginPath();                                               // the back of the hand
+    x.moveTo(-u * 0.58, -u * 0.3);
+    x.quadraticCurveTo(-u * 0.68, u * 0.2, -u * 0.44, u * 0.6);
+    x.quadraticCurveTo(0, u * 0.86, u * 0.44, u * 0.6);
+    x.quadraticCurveTo(u * 0.66, u * 0.2, u * 0.56, -u * 0.3);
+    x.quadraticCurveTo(0, -u * 0.5, -u * 0.58, -u * 0.3);
+    x.closePath();
+    x.fillStyle = grad; x.fill();
+    x.lineWidth = u * 0.013; x.strokeStyle = edge; x.stroke();
+
+    x.save();                                                    // thumb, over the near edge
+    x.translate(-u * 0.52, u * 0.16);
+    x.rotate(-1.2);
+    x.fillStyle = grad;
+    rr(x, -u * 0.155, -u * 0.74, u * 0.31, u * 0.95, u * 0.155);
+    x.fill();
+    x.lineWidth = u * 0.013; x.strokeStyle = edge; x.stroke();
+    x.fillStyle = rgba(skin(SKIN.nail), 0.88);
+    rr(x, -u * 0.095, -u * 0.68, u * 0.19, u * 0.21, u * 0.08);
+    x.fill();
+    x.restore();
+
+    x.strokeStyle = rgba(skin(SKIN.deep), 0.3);                  // knuckles
+    x.lineWidth = u * 0.02;
+    for (const f of FINGERS) {
+      x.beginPath();
+      x.arc(f[0] * u, -u * 0.24, u * 0.09, Math.PI * 1.15, Math.PI * 1.85);
+      x.stroke();
     }
-    g.save();                                                   // thumb
-    g.rotate(-0.6);
-    rr(g, u * 0.42, -u * 0.16, u * 0.52, u * 0.26, u * 0.13);
-    g.fill();
-    g.restore();
 
+    x.strokeStyle = rgba("#FFFFFF", darkNow ? 0.05 : 0.14);      // tendons
+    x.lineWidth = u * 0.022;
+    for (const f of FINGERS) {
+      x.beginPath();
+      x.moveTo(f[0] * u, -u * 0.18);
+      x.quadraticCurveTo(f[0] * u * 0.6, u * 0.12, f[0] * u * 0.32, u * 0.44);
+      x.stroke();
+    }
+  }
+
+  function drawPalm(cx, cy, scale, alpha) {
+    const c = handSprite();
+    const u = VH * 0.32 * scale;
+    g.globalAlpha = alpha;
+    g.drawImage(c, cx - u * HAND_OX, cy - u * HAND_OY, u * HAND_W, u * HAND_H);
     g.globalAlpha = 1;
-    g.restore();
   }
 
   function drawSlap(now) {
-    if (!slapFx) return;
+    if (!slapFx || reduced) return;
     const e = now - slapFx.t0;
 
     if (e < SLAP_FALL) {                       // coming down
       const p = e / SLAP_FALL;
       const drop = p * p;                      // accelerating
-      const shadow = 0.25 + drop * 0.75;
-      g.fillStyle = rgba("#000000", (darkNow ? 0.5 : 0.3) * shadow);
+      const sh = 0.25 + drop * 0.75;
+      g.fillStyle = rgba("#000000", (darkNow ? 0.5 : 0.3) * sh);
       g.beginPath();
-      g.ellipse(slapFx.x, slapFx.y, W * 0.42 * shadow, H * 0.2 * shadow, 0, 0, 6.2832);
+      g.ellipse(slapFx.x, slapFx.y + S * 0.5, SLAP_R * 0.62 * sh, SLAP_R * 0.3 * sh, 0, 0, 6.2832);
       g.fill();
-      drawPalm(slapFx.x, slapFx.y - H * (1.3 - drop * 1.3), 0.55 + drop * 0.45, 0.4 + drop * 0.55);
+      drawPalm(slapFx.x, slapFx.y - VH * (1.5 - drop * 1.5), 0.6 + drop * 0.4, 0.45 + drop * 0.55);
       return;
     }
 
-    if (!slapFx.hit) { slapFx.hit = true; if (!reduced) slapLand(); }
+    const held = e - SLAP_FALL;
+    if (held < SLAP_HOLD) { drawPalm(slapFx.x, slapFx.y, 1, 1); return; }
 
-    const p = Math.min(1, (e - SLAP_FALL) / SLAP_LIFT);   // lifting off
-    if (p >= 1) { slapFx = null; return; }
-    drawPalm(slapFx.x, slapFx.y - H * 1.3 * p * p, 1 - p * 0.2, (1 - p) * 0.95);
+    const p = Math.min(1, (held - SLAP_HOLD) / SLAP_LIFT);   // lifting off
+    if (p >= 1) return;
+    drawPalm(slapFx.x, slapFx.y - VH * 1.5 * p * p, 1 - p * 0.12, (1 - p) * 0.95);
   }
 
   /* ══ multiplayer ═════════════════════════════════════════
-     A relay, not a server: it stores nothing and decides nothing.
-     Everyone sends where they are ~12 times a second and draws whoever
-     else is in the room. Positions travel as (zone, fraction across,
-     fraction down) so two players on different screen sizes — whose cell
-     grids genuinely differ — still stand in the same place relative to the
-     world. Cells stay local; only people are shared. */
+     A relay, not a server: it stores nothing and decides nothing. What keeps
+     everybody's world the same is that the world itself is deterministic —
+     one fixed grid on every device, and cells that refill on a schedule
+     baked into the cell rather than rolled at random. So clients only have
+     to agree on *events*, never on state:
+
+       · where each player is, twelve times a second
+       · where the wanderers are, from whichever client is host — the lowest
+         id in the room. Everyone else plays those positions back.
+       · one short message per bang: a tap, a collision, a slap, an emote.
+
+     Nobody ever sends the sheet. Cells pop under a peer's feet on your
+     machine because you are running the same footsteps they are. */
 
   const ROOM = "friends";
   const SEND_HZ = 12;
@@ -1829,9 +1979,21 @@
   if (relayParam !== null) store.set("relay", relayParam);
   const RELAY = (relayParam !== null ? relayParam : store.get("relay", DEFAULT_RELAY)).trim();
 
-  const net = { ws: null, id: null, name: "", peers: new Map(), sendAt: 0, state: "off" };
+  const net = {
+    ws: null, id: null, name: "", peers: new Map(), ids: new Set(),
+    sendAt: 0, npcAt: 0, state: "off"
+  };
 
-  const netSpan = () => zoneW + bridgeW;
+  const idNum = s => parseInt(s, 10) || 0;
+
+  // The lowest id in the room runs the wanderers. On your own, that's you —
+  // which is why single player behaves exactly as it always did.
+  function isHost() {
+    if (net.state !== "on" || !net.id) return true;
+    const me = idNum(net.id);
+    for (const id of net.ids) if (idNum(id) < me) return false;
+    return true;
+  }
 
   function paintOnline() {
     const el = document.getElementById("online");
@@ -1862,41 +2024,53 @@
     ws.onopen = () => { net.state = "on"; paintOnline(); netSend(true); };
     ws.onerror = () => { net.state = "error"; paintOnline(); };
     ws.onclose = () => {
-      net.ws = null; net.peers.clear();
+      net.ws = null; net.peers.clear(); net.ids.clear();
       if (net.state !== "full") net.state = "error";
       paintOnline();
       setTimeout(() => { if (!net.ws && net.name) netConnect(net.name); }, 4000);
     };
     ws.onmessage = ev => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-      netApply(m);
+      try { netApply(m); } catch (e) { /* a bad packet must not stop the world */ }
     };
   }
 
+  function newPeer(id) {
+    const p = {
+      x: 0, y: 0, z: 0, vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0,
+      tx: 0, ty: 0, thop: 0, placed: 0,
+      step: Math.random() * 6, face: 1, blink: 0, nextBlink: 2200, cool: 0,
+      scale: 1, belt: true, remote: true, name: "", emo: null, duet: null,
+      look: { body: "auto", hat: "none", eyes: "dots" }
+    };
+    net.peers.set(id, p);
+    net.ids.add(id);
+    paintOnline();
+    return p;
+  }
+
   function netApply(m) {
-    if (m.t === "hello") { net.id = m.id; return; }
+    if (m.t === "hello") {
+      net.id = m.id;
+      for (const id of m.peers || []) net.ids.add(id);
+      return;
+    }
     if (m.t === "full") { net.state = "full"; paintOnline(); return; }
-    if (m.t === "left") { net.peers.delete(m.id); paintOnline(); return; }
-    if (m.t === "join") { netSend(true); return; }      // re-announce so they see us
+    if (m.t === "join") { net.ids.add(m.id); netSend(true); return; }   // re-announce so they see us
+    if (m.t === "left") {
+      const p = net.peers.get(m.id);
+      if (p && p.duet) endDuet(p.duet);
+      net.peers.delete(m.id); net.ids.delete(m.id);
+      paintOnline();
+      return;
+    }
 
     if (m.t === "s") {
-      let p = net.peers.get(m.id);
-      if (!p) {
-        p = {
-          x: 0, y: 0, z: 0, vx: 0, vy: 0, kx: 0, ky: 0, hop: 0, hopV: 0, thop: 0,
-          step: Math.random() * 6, face: 1, blink: 0, nextBlink: 2200, cool: 0,
-          scale: 1, belt: true, remote: true, name: "",
-          look: { body: "auto", hat: "none", eyes: "dots" }
-        };
-        net.peers.set(m.id, p);
-        paintOnline();
-      }
+      const p = net.peers.get(m.id) || newPeer(m.id);
       p.name = String(m.n || "").slice(0, 14);
       if (m.l) p.look = { body: m.l[0], hat: m.l[1], eyes: m.l[2] };
-      p.z = Math.min(PACKS.length - 1, Math.max(0, m.z | 0));
-      p.tx = zoneStart(p.z) + m.x * netSpan();          // back into this client's world
-      p.ty = m.y * H;
-      p.thop = (m.h || 0) * S;
+      p.tx = +m.x; p.ty = +m.y;                        // same world, same numbers
+      p.thop = +m.h || 0;
       p.face = m.f >= 0 ? 1 : -1;
       p.moving = !!m.m;
       p.seen = performance.now();
@@ -1904,11 +2078,42 @@
       return;
     }
 
-    if (m.t === "slap") {                               // someone else brought the hand down
-      const p = net.peers.get(m.id);
-      if (!p) return;
-      rings.push({ x: p.x, y: p.y, t: performance.now(), life: 620, big: true });
-      if (!reduced) shake = Math.max(shake, 0.5);
+    if (m.t === "n") {                                 // the host's wanderers
+      if (isHost()) return;                            // …unless that's me
+      const a = m.a || [];
+      for (let i = 0; i < Math.min(a.length, npcs.length); i++) {
+        const n = npcs[i], s = a[i];
+        n.rx = s[0]; n.ry = s[1]; n.rface = s[2]; n.moving = s[3]; n.rhop = s[4];
+        if (!n.placed) { n.placed = 1; n.x = n.rx; n.y = n.ry; n.hop = n.rhop; n.face = n.rface; }
+      }
+      return;
+    }
+
+    if (m.t === "p") {                                 // somebody tapped a cell
+      const c = cells[m.i | 0];
+      if (c) popCell(c, performance.now(), false);
+      return;
+    }
+
+    if (m.t === "b") {                                 // somebody walked into somebody
+      blast(+m.x, +m.y, performance.now(), false);
+      if (isHost() && m.i != null && npcs[m.i]) {      // the shove they felt, applied where it counts
+        const n = npcs[m.i];
+        const d = Math.hypot(n.x - m.x, n.y - m.y) || 1;
+        n.kx += (n.x - m.x) / d * S * 7;
+        n.ky += (n.y - m.y) / d * S * 7;
+        n.turn = 0.15;
+      }
+      return;
+    }
+
+    if (m.t === "k") { startSlap(+m.x, +m.y, false); return; }
+
+    if (m.t === "e") {
+      const p = net.peers.get(m.id) || newPeer(m.id);
+      p.emo = { k: String(m.k || "").slice(0, 4), t: performance.now() };
+      pairUp();
+      return;
     }
   }
 
@@ -1923,28 +2128,49 @@
         t: "s",
         n: net.name,
         l: [look.body, look.hat, look.eyes],
-        z: zone,
-        x: (w.x - zoneStart(zone)) / netSpan(),         // relative: screen size stops mattering
-        y: w.y / H,
-        h: (w.hop || 0) / S,
+        x: Math.round(w.x), y: Math.round(w.y),        // the world is the same size everywhere now
+        h: Math.round(w.hop || 0),
         f: w.face >= 0 ? 1 : -1,
         m: Math.hypot(w.vx, w.vy) > S * 0.4 ? 1 : 0
       }));
     } catch (e) { /* the socket closes itself */ }
   }
 
+  function netEvent(o) {
+    if (!net.ws || net.ws.readyState !== 1) return;
+    try { net.ws.send(JSON.stringify(o)); } catch (e) {}
+  }
+
+  function netNpcs() {
+    if (!net.ws || net.ws.readyState !== 1) return;
+    const now = performance.now();
+    if (now - net.npcAt < 1000 / SEND_HZ) return;
+    net.npcAt = now;
+    netEvent({
+      t: "n",
+      a: npcs.map(n => [Math.round(n.x), Math.round(n.y), n.face >= 0 ? 1 : -1,
+                        n.moving ? 1 : 0, Math.round(n.hop || 0)])
+    });
+  }
+
   // remote players are critters somebody else is steering
   function stepPeers(now, dt) {
     for (const [id, p] of net.peers) {
-      if (now - p.seen > 12000) { net.peers.delete(id); paintOnline(); continue; }
-      const k = Math.min(1, dt * 12);
+      if (now - p.seen > 12000) {
+        if (p.duet) endDuet(p.duet);
+        net.peers.delete(id); net.ids.delete(id); paintOnline();
+        continue;
+      }
+      const e = Math.min(1, dt * 12);
       const ox = p.x, oy = p.y;
-      p.x += (p.tx - p.x) * k;
-      p.y += (p.ty - p.y) * k;
-      p.hop += (p.thop - p.hop) * k;
+      p.x += (p.tx - p.x) * e;
+      p.y += (p.ty - p.y) * e;
+      p.hop += (p.thop - p.hop) * e;
       p.vx = dt > 0 ? (p.x - ox) / dt : 0;
       p.vy = dt > 0 ? (p.y - oy) / dt : 0;
       tick(p, dt, p.moving ? 1 : 0);
+      // their feet flatten your sheet too — same footsteps, same cells
+      if (p.moving) trample(p, now, S * 0.56, true, false);
     }
   }
 
@@ -1955,7 +2181,7 @@
     g.textAlign = "center";
     g.textBaseline = "middle";
     for (const [, p] of net.peers) {
-      if (!p.name || p.x < cam.x - S * 2 || p.x > cam.x + W + S * 2) continue;
+      if (!p.name || p.x < cam.x - S * 2 || p.x > cam.x + viewW + S * 2) continue;
       const y = p.y + p.hop - S * 1.05;
       const wide = g.measureText(p.name).width + fs * 1.5;
       rr(g, p.x - wide / 2, y - fs * 0.85, wide, fs * 1.7, fs * 0.85);
@@ -1966,40 +2192,60 @@
     }
   }
 
-  function collide(now) {
-    // bumping into a friend does the same thing as bumping into a wanderer
-    for (const [, p] of net.peers) {
-      const dx = p.x - walker.x, dy = p.y - walker.y;
+  function collide(now, hosting) {
+    const w = walker;
+    if (w.duet) return;                                // hugging is not colliding
+
+    // bumping into a friend does the same thing as bumping into a wanderer.
+    // The lower of the two ids owns the pair, so the bang happens once and
+    // both of you see the same one.
+    for (const [id, p] of net.peers) {
+      if (p.duet) continue;
+      const dx = p.x - w.x, dy = p.y - w.y;
       const d = Math.hypot(dx, dy) || 0.001;
-      const sep = S * 0.55 * 2 * 1.5;
-      if (d > sep || p.cool > 0) continue;
+      const sep = S * 1.65;
+      if (d > sep) continue;
       const ux = dx / d, uy = dy / d;
-      walker.x -= ux * ((sep - d) / 2 + S * 0.3);
-      walker.y -= uy * ((sep - d) / 2 + S * 0.3);
-      walker.kx -= ux * S * 7; walker.ky -= uy * S * 7;
+      w.x -= ux * ((sep - d) / 2 + S * 0.3);
+      w.y -= uy * ((sep - d) / 2 + S * 0.3);
+      w.kx -= ux * S * 7; w.ky -= uy * S * 7;
+      if (p.cool > 0) continue;
       p.cool = 0.9;
-      blast((p.x + walker.x) / 2, (p.y + walker.y) / 2, now);
+      if (idNum(net.id) < idNum(id)) {
+        const bx = (p.x + w.x) / 2, by = (p.y + w.y) / 2;
+        blast(bx, by, now, true);
+        netEvent({ t: "b", x: Math.round(bx), y: Math.round(by) });
+      }
     }
 
-    for (const n of npcs) {
-      const dx = n.x - walker.x, dy = n.y - walker.y;
+    for (let i = 0; i < npcs.length; i++) {
+      const n = npcs[i];
+      if (!n.placed) continue;
+      const dx = n.x - w.x, dy = n.y - w.y;
       const d = Math.hypot(dx, dy) || 0.001;
-      const sep = S * 0.55 * (walker.scale + n.scale) * 1.5;   // about two people apart
+      const sep = S * 0.55 * (w.scale + n.scale) * 1.5;   // about two people apart
       if (d > sep) continue;
 
       const ux = dx / d, uy = dy / d;
       const push = (sep - d) / 2 + S * 0.3;
       n.x += ux * push; n.y += uy * push;
-      walker.x -= ux * push; walker.y -= uy * push;
+      w.x -= ux * push; w.y -= uy * push;
 
       const kick = S * 7;
       n.kx += ux * kick; n.ky += uy * kick;
-      walker.kx -= ux * kick; walker.ky -= uy * kick;
+      w.kx -= ux * kick; w.ky -= uy * kick;
       n.turn = 0.15;
 
-      if (n.cool <= 0) { blast((n.x + walker.x) / 2, (n.y + walker.y) / 2, now); n.cool = 0.9; }
+      if (n.cool <= 0) {
+        n.cool = 0.9;
+        const bx = (n.x + w.x) / 2, by = (n.y + w.y) / 2;
+        blast(bx, by, now, true);
+        // the index rides along so the host can shove the same wanderer
+        netEvent({ t: "b", x: Math.round(bx), y: Math.round(by), i });
+      }
     }
 
+    if (!hosting) return;
     for (let i = 0; i < npcs.length; i++) {             // wanderers just step around each other
       for (let j = i + 1; j < npcs.length; j++) {
         const a = npcs[i], b = npcs[j];
@@ -2011,6 +2257,181 @@
         b.x += ux * p; b.y += uy * p;
         a.x -= ux * p; a.y -= uy * p;
       }
+    }
+  }
+
+  /* ══ emotes, and what two of them together mean ══════════
+     One tap puts a face over your head for two seconds and tells the room.
+     If two people show the same face inside that window, the closest pair of
+     them stops being two people standing near each other and starts being a
+     scene: hearts hug, skulls throw hands. Every client works out the pair
+     from the same events, and each one only drives its own body — so the two
+     halves meet in the middle without anybody being in charge. */
+
+  const EMO = ["❤️", "😭", "😠", "💀"];
+  const EMO_MS = 2000;
+  const DUET_REACH = S * 20;                 // further apart than this and the moment has passed
+  const duets = [];
+
+  function emote(k) {
+    walker.emo = { k, t: performance.now() };
+    netEvent({ t: "e", k });
+    pairUp();
+  }
+
+  function bodies() {
+    const list = [{ id: net.id || "me", b: walker }];
+    for (const [id, p] of net.peers) list.push({ id, b: p });
+    return list;
+  }
+
+  function pairUp() {
+    const now = performance.now();
+    for (const kind of ["❤️", "💀"]) {
+      const set = bodies().filter(o =>
+        o.b.emo && o.b.emo.k === kind && now - o.b.emo.t < EMO_MS && !o.b.duet && o.b.placed !== 0);
+      if (set.length < 2) continue;
+      let best = null, bd = DUET_REACH;
+      for (let i = 0; i < set.length; i++) {
+        for (let j = i + 1; j < set.length; j++) {
+          const d = Math.hypot(set[i].b.x - set[j].b.x, set[i].b.y - set[j].b.y);
+          if (d < bd) { bd = d; best = [set[i].b, set[j].b]; }
+        }
+      }
+      if (best) startDuet(kind, best[0], best[1], now);
+    }
+  }
+
+  function startDuet(kind, a, b, now) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const D = {
+      kind, a, b, t0: now,
+      cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,        // frozen, so it can't drift apart
+      ux: dx / d, uy: dy / d,
+      dur: kind === "❤️" ? 2200 : 2400, jab: 0
+    };
+    a.duet = D; b.duet = D;
+    a.emo = b.emo = null;                              // the scene replaces the face
+    duets.push(D);
+  }
+
+  function endDuet(D) {
+    const i = duets.indexOf(D);
+    if (i >= 0) duets.splice(i, 1);
+    if (D.a) D.a.duet = null;
+    if (D.b) D.b.duet = null;
+  }
+
+  const APPROACH = 620;
+
+  function stepDuets(now, dt) {
+    for (let i = duets.length - 1; i >= 0; i--) {
+      const D = duets[i];
+      const e = now - D.t0;
+      if (e > D.dur) { endDuet(D); continue; }
+
+      const gap = D.kind === "❤️" ? S * 0.58 : S * 1.25;
+      const ease = easeOut(Math.min(1, e / APPROACH));
+
+      // where each of them belongs this instant: their half of the gap, plus
+      // however far into the other one they're leaning
+      const L = D.kind === "💀" ? lunges(e) : ZERO2;
+      drive(D.a, D.cx - D.ux * (gap / 2 - L[0]), D.cy - D.uy * (gap / 2 - L[0]), ease, dt);
+      drive(D.b, D.cx + D.ux * (gap / 2 - L[1]), D.cy + D.uy * (gap / 2 - L[1]), ease, dt);
+
+      D.a.face = D.ux >= 0 ? 1 : -1;                   // look at each other
+      D.b.face = D.ux >= 0 ? -1 : 1;
+
+      if (D.kind === "❤️") {
+        if (!reduced && e > APPROACH && Math.random() < dt * 14) {
+          parts.push({
+            x: D.cx + (Math.random() - 0.5) * S * 0.8, y: D.cy - S * 0.4,
+            vx: (Math.random() - 0.5) * 0.6, vy: -1.1 - Math.random(),
+            r: 2.4 + Math.random() * 2, life: 700 + Math.random() * 400,
+            t: now, c: "#EE6B8B", heart: true
+          });
+        }
+      } else {
+        // three landed punches, one every 400ms once they're in range
+        const beat = Math.floor((e - APPROACH) / 400);
+        if (beat >= 0 && beat < 3 && beat >= D.jab) {
+          D.jab = beat + 1;
+          punchFx(D, now, beat);
+        }
+      }
+    }
+  }
+
+  // Three punches, one every 400ms, taking turns. Returns how far each of
+  // the two is leaning into the other right now.
+  const ZERO2 = [0, 0];
+  function lunges(e) {
+    const t = e - APPROACH;
+    if (t < 0) return ZERO2;
+    const beat = Math.floor(t / 400), phase = t % 400;
+    if (beat > 2 || phase > 200) return ZERO2;
+    const amt = Math.sin(phase / 200 * Math.PI) * S * 0.5;
+    return beat % 2 === 0 ? [amt, 0] : [0, amt];
+  }
+
+  // only bodies this client owns get pushed; the peer's own machine is doing
+  // the same sum for the other half
+  function drive(b, x, y, ease, dt) {
+    if (b.remote) return;
+    b.vx = 0; b.vy = 0; b.kx = 0; b.ky = 0;
+    const e = Math.min(1, dt * (6 + 16 * ease));
+    b.x += (x - b.x) * e;
+    b.y += (y - b.y) * e;
+    b.step += dt * 9;
+  }
+
+  function punchFx(D, now, beat) {
+    const s = beat % 2 ? -1 : 1;                       // +1: a hits b, -1: b hits a
+    const hx = D.cx + D.ux * S * 0.3 * s, hy = D.cy + D.uy * S * 0.3 * s;
+    const target = beat % 2 ? D.a : D.b;
+    if (!target.remote) {                              // their own machine rocks them back
+      target.kx += D.ux * S * 5 * s;
+      target.ky += D.uy * S * 5 * s;
+      target.hopV = Math.min(target.hopV, -S * 1.4);
+    }
+    rings.push({ x: hx, y: hy, t: now, life: 300, stomp: true });
+    if (!reduced) {
+      shake = Math.max(shake, 0.55);
+      for (let i = 0; i < 7; i++) {
+        const a = Math.random() * 6.2832, sp = 1 + Math.random() * 2.4;
+        parts.push({
+          x: hx, y: hy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6,
+          r: 1.4 + Math.random() * 2, life: 300 + Math.random() * 240,
+          t: now, c: "#F0C24B"
+        });
+      }
+    }
+    boom((hx - cam.x) * k);
+  }
+
+  // the face over your head, and the hearts over a hug
+  function drawEmotes(now) {
+    const list = [walker, ...net.peers.values()];
+    const size = S * 0.66;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = size + `px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    for (const b of list) {
+      if (!b.emo) continue;
+      const e = now - b.emo.t;
+      if (e > EMO_MS) { b.emo = null; continue; }
+      if (b.x < cam.x - S * 2 || b.x > cam.x + viewW + S * 2) continue;
+      const p = e / EMO_MS;
+      const pop = p < 0.16 ? easeOut(p / 0.16) : 1;
+      const y = b.y + b.hop - S * 1.62 - pop * S * 0.16;
+      g.globalAlpha = p > 0.82 ? (1 - p) / 0.18 : 1;
+      g.fillStyle = rgba(darkNow ? "#0C0C11" : "#FFFFFF", 0.55);
+      g.beginPath();
+      g.ellipse(b.x, y + size * 0.06, size * 0.62, size * 0.58, 0, 0, 6.2832);
+      g.fill();
+      g.fillText(b.emo.k, b.x, y);
+      g.globalAlpha = 1;
     }
   }
 
@@ -2041,6 +2462,10 @@
     g.fill();
     g.translate(0, w.hop);
 
+    // mid-scene, lean into whoever you're hugging or hitting
+    const D = w.duet;
+    if (D) g.rotate((D.a === w ? 1 : -1) * (D.ux >= 0 ? 1 : -1) * (D.kind === "❤️" ? 0.17 : 0.1));
+
     g.fillStyle = body;
     for (const s of [-1, 1]) {                       // feet, tucked under the body
       const lift = Math.max(0, gait * s) * u * 0.3 * spd;
@@ -2052,10 +2477,13 @@
     g.translate(0, bob);
 
     if (w.belt) {
-      for (const s of [-1, 1]) {                     // arms swing against the legs
+      // arms swing against the legs — unless they're busy holding somebody
+      const hugX = D && D.kind === "❤️" ? w.face * u * 0.32 : 0;
+      for (const s of [-1, 1]) {
         const swing = Math.max(0, -gait * s) * u * 0.14 * spd;
         g.beginPath();
-        g.ellipse(s * (bw + u * 0.04), u * 0.16 - swing, u * 0.125, u * 0.17, 0, 0, 6.2832);
+        g.ellipse(s * (bw + u * 0.04) + hugX, u * 0.16 - swing - (hugX ? u * 0.16 : 0),
+          u * 0.125, u * 0.17, 0, 0, 6.2832);
         g.fill();
       }
     } else {
@@ -2172,8 +2600,8 @@
   });
 
   function eachBridge(fn) {
-    const b = BAND(), y0 = H / 2 - b, y1 = H / 2 + b;
-    const vx0 = cam.x - S, vx1 = cam.x + W + S;
+    const b = BAND(), y0 = VH / 2 - b, y1 = VH / 2 + b;
+    const vx0 = cam.x - S, vx1 = cam.x + viewW + S;
     for (let i = 1; i < PACKS.length; i++) {
       const x0 = zoneEnd(i - 1), x1 = zoneStart(i);
       if (x1 < vx0 || x0 > vx1) continue;
@@ -2299,19 +2727,29 @@
     const dt = Math.min(0.05, (now - prevT) / 1000);
     prevT = now;
 
+    const hosting = isHost();
+    // whoever inherits the room inherits the wanderers: pull them into the
+    // zone you're actually standing in, or they'd stay where the last host left
+    if (hosting !== net.wasHost) { net.wasHost = hosting; if (hosting) fitNpcs(); }
+
     if (walker.on) stepWalker(now, dt);
-    for (const n of npcs) stepNpc(n, now, dt);
+    if (hosting) { for (const n of npcs) stepNpc(n, now, dt); }
+    else { for (const n of npcs) stepNpcRemote(n, now, dt); }
     stepPeers(now, dt);
-    if (walker.on) collide(now);
+    stepDuets(now, dt);
+    if (walker.on) collide(now, hosting);
+    stepSlap(now);
     netSend(false);
+    if (hosting) netNpcs();
 
     // the camera trails the walker down the strip
-    const focus = walker.on ? walker.x : cam.x + W / 2;
-    const target = Math.min(Math.max(focus - W / 2, 0), Math.max(0, worldW - W));
+    const focus = walker.on ? walker.x : cam.x + viewW / 2;
+    const target = Math.min(Math.max(focus - viewW / 2, 0), Math.max(0, worldW - viewW));
     cam.x += (target - cam.x) * Math.min(1, dt * 7);
 
     g.clearRect(0, 0, W, H);
     g.save();
+    g.scale(k, k);                            // world units from here down
     let ox = -cam.x, oy = 0;
     if (shake > 0) {
       shake = Math.max(0, shake - dt * 4.5);
@@ -2319,19 +2757,24 @@
       ox += (Math.random() - 0.5) * m;
       oy += (Math.random() - 0.5) * m;
     }
-    g.translate(ox, oy);                      // everything below is world space
+    g.translate(ox, oy);
 
     drawBridgeBack();
 
     const half = S * sprScale / 2;
-    const vx0 = cam.x - S, vx1 = cam.x + W + S;
+    const vx0 = cam.x - S, vx1 = cam.x + viewW + S;
 
     for (const c of cells) {
-      if (c.x < vx0 || c.x > vx1) continue;   // only what the camera can see
-      const e = now - c.t;
-      if (c.st === 1 && e > POP_MS) { c.st = 2; c.t = now; c.wait = 1500 + Math.random() * 2800; }
-      else if (c.st === 2 && e > c.wait) { c.st = 3; c.t = now; }
-      else if (c.st === 3 && e > INFLATE_MS) { c.st = 0; c.t = now; }
+      // The whole sheet keeps its clock, on screen or not. A cell somebody
+      // popped three zones away has to be as far along when you walk up to it
+      // as it is on their screen — if it only started counting once you looked,
+      // the two of you would be standing in different worlds.
+      let e = now - c.t;
+      if (c.st === 1 && e > POP_MS) { c.st = 2; c.t = now; e = 0; }
+      else if (c.st === 2 && e > c.wait) { c.st = 3; c.t = now; e = 0; }
+      else if (c.st === 3 && e > INFLATE_MS) { c.st = 0; c.t = now; e = 0; }
+
+      if (c.x < vx0 || c.x > vx1) continue;   // clocked everywhere, drawn only in shot
 
       if (c.st !== 0) g.drawImage(sockets[c.z], c.x - half, c.y - half, S * sprScale, S * sprScale);
 
@@ -2379,31 +2822,35 @@
       vg.addColorStop(0, rgba(gc, 0));
       vg.addColorStop(1, rgba(gc, 0.7));
       g.fillStyle = vg;
-      g.fillRect(x0, 0, fade, H);
+      g.fillRect(x0, 0, fade, VH);
       g.fillStyle = rgba(gc, 0.7);
-      g.fillRect(x0 + fade, 0, Math.max(0, worldW - x0 - fade), H);
+      g.fillRect(x0 + fade, 0, Math.max(0, worldW - x0 - fade), VH);
       break;
     }
 
-    for (const n of npcs) drawCritter(n);
+    for (const n of npcs) if (n.placed) drawCritter(n);
     for (const [, p] of net.peers) drawCritter(p);
     if (walker.on) drawCritter(walker);
     drawPeerTags();
+    drawEmotes(now);
     drawBridgeFront();
-    drawSlap(now);                            // the hand covers everything
 
     // rings
     for (let i = rings.length - 1; i >= 0; i--) {
       const r = rings[i], p = (now - r.t) / r.life;
       if (p >= 1) { rings.splice(i, 1); continue; }
       if (p < 0) continue;                                  // staggered blast ring, not due yet
-      const grow = r.big ? 0.3 + easeOut(p) * 2.5
-        : r.stomp ? 0.28 + easeOut(p) * 1.45
-        : 0.34 + easeOut(p) * 0.8;
+      // a wave ring is already out at the front of the shock and only widens
+      // a little; the rest grow from nothing
+      const rad = r.wave ? r.wave + easeOut(p) * S * 1.1
+        : S * (r.big ? 0.3 + easeOut(p) * 2.5
+          : r.stomp ? 0.28 + easeOut(p) * 1.45
+          : 0.34 + easeOut(p) * 0.8);
       g.beginPath();
-      g.arc(r.x, r.y, S * grow, 0, 6.2832);
-      g.strokeStyle = rgba(PACKS[nearestZone(r.x)].accent, (1 - p) * (r.big ? 0.8 : r.stomp ? 0.9 : 0.5));
-      g.lineWidth = (r.big ? 4 : r.stomp ? 5 : 2) * (1 - p) + 0.4;
+      g.arc(r.x, r.y, rad, 0, 6.2832);
+      g.strokeStyle = rgba(PACKS[nearestZone(r.x)].accent,
+        (1 - p) * (r.wave ? 0.55 : r.big ? 0.8 : r.stomp ? 0.9 : 0.5));
+      g.lineWidth = (r.wave ? 6 : r.big ? 4 : r.stomp ? 5 : 2) * (1 - p) + 0.4;
       g.stroke();
     }
 
@@ -2425,14 +2872,27 @@
       const q = parts[i], p = (now - q.t) / q.life;
       if (p >= 1) { parts.splice(i, 1); continue; }
       q.x += q.vx; q.y += q.vy;
-      q.vy += q.soft ? 0.02 : 0.08;              // dust hangs, shards fall
+      q.vy += q.heart ? -0.012 : q.soft ? 0.02 : 0.08;   // hearts rise, dust hangs, shards fall
       q.vx *= q.soft ? 0.94 : 0.985;
       q.vy *= q.soft ? 0.94 : 0.985;
-      g.beginPath();
-      g.arc(q.x, q.y, q.r * (q.soft ? 1 + p * 0.9 : 1 - p * 0.6), 0, 6.2832);
-      g.fillStyle = rgba(q.c, (1 - p) * (q.soft ? 0.3 : 0.72));
-      g.fill();
+      const rad = q.r * (q.soft ? 1 + p * 0.9 : 1 - p * 0.6);
+      g.fillStyle = rgba(q.c, (1 - p) * (q.heart ? 0.9 : q.soft ? 0.3 : 0.72));
+      if (q.heart) {
+        const s = rad * 1.5;
+        g.beginPath();
+        g.moveTo(q.x, q.y + s * 0.9);
+        g.bezierCurveTo(q.x - s * 1.6, q.y - s * 0.35, q.x - s * 0.5, q.y - s * 1.25, q.x, q.y - s * 0.35);
+        g.bezierCurveTo(q.x + s * 0.5, q.y - s * 1.25, q.x + s * 1.6, q.y - s * 0.35, q.x, q.y + s * 0.9);
+        g.fill();
+      } else {
+        g.beginPath();
+        g.arc(q.x, q.y, rad, 0, 6.2832);
+        g.fill();
+      }
     }
+
+    // last, so it covers everything: you don't see the shockwave through a hand
+    drawSlap(now);
 
     g.restore();
     requestAnimationFrame(frame);
@@ -2440,59 +2900,50 @@
 
   /* ══ input ═══════════════════════════════════════════════ */
 
+  /* There is no joystick any more. Put a finger down anywhere and drag: the
+     point you touched becomes the centre and the character walks the way you
+     pull. Let go without dragging and it was a tap, so that still pops the
+     bubble you meant to pop. */
+
   let hinted = false;
-  const down = new Set();
+  const REACH = 78;                        // screen pixels from the touch to full tilt
+  const SLOP = 11;                         // and how far you can wander before it's a drag
 
   cvs.addEventListener("pointerdown", e => {
     audio();
     if (ac.state === "suspended") ac.resume();
-    down.add(e.pointerId);
+    if (stick.id !== null) return;         // one finger drives; the rest are ignored
+    stick.id = e.pointerId;
+    stick.ox = e.clientX; stick.oy = e.clientY;
+    stick.moved = false;
     cvs.setPointerCapture(e.pointerId);
-    hit(e.clientX, e.clientY);
+    if (!walker.on) hit(e.clientX, e.clientY);
   });
+
   cvs.addEventListener("pointermove", e => {
-    if (!down.has(e.pointerId)) return;
-    const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    for (const p of pts) hit(p.clientX, p.clientY);
+    if (stick.id !== e.pointerId) return;
+    if (!walker.on) {                      // no character: a drag is a pop trail again
+      const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const p of pts) hit(p.clientX, p.clientY);
+      return;
+    }
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    if (!stick.moved && Math.hypot(dx, dy) < SLOP) return;   // still could be a tap
+    stick.moved = true;
+    dx /= REACH; dy /= REACH;
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    stick.dx = dx; stick.dy = dy;
   });
-  const release = e => { down.delete(e.pointerId); };
+
+  const release = e => {
+    if (stick.id !== e.pointerId) return;
+    if (walker.on && !stick.moved) hit(stick.ox, stick.oy);
+    stick.id = null; stick.dx = stick.dy = 0; stick.moved = false;
+  };
   cvs.addEventListener("pointerup", release);
   cvs.addEventListener("pointercancel", release);
   cvs.addEventListener("contextmenu", e => e.preventDefault());
-
-  /* joystick */
-  const stickEl = document.getElementById("stick");
-  const knobEl = document.getElementById("knob");
-
-  function aim(e) {
-    const b = stickEl.getBoundingClientRect();
-    const reach = b.width / 2 - 22;
-    let dx = (e.clientX - (b.left + b.width / 2)) / reach;
-    let dy = (e.clientY - (b.top + b.height / 2)) / reach;
-    const m = Math.hypot(dx, dy);
-    if (m > 1) { dx /= m; dy /= m; }
-    if (m < 0.14) { dx = dy = 0; }                     // dead zone
-    stick.dx = dx; stick.dy = dy;
-    knobEl.style.transform = `translate(${dx * reach}px, ${dy * reach}px)`;
-  }
-
-  stickEl.addEventListener("pointerdown", e => {
-    e.preventDefault();
-    audio();
-    stick.id = e.pointerId;
-    stickEl.setPointerCapture(e.pointerId);
-    stickEl.classList.add("gripped");
-    aim(e);
-  });
-  stickEl.addEventListener("pointermove", e => { if (stick.id === e.pointerId) aim(e); });
-  const drop = e => {
-    if (stick.id !== e.pointerId) return;
-    stick.id = null; stick.dx = stick.dy = 0;
-    stickEl.classList.remove("gripped");
-    knobEl.style.transform = "translate(0px, 0px)";
-  };
-  stickEl.addEventListener("pointerup", drop);
-  stickEl.addEventListener("pointercancel", drop);
 
   /* keys: arrows and WASD steer, everything else pops —
      which is the whole joke of the switch packs */
@@ -2512,7 +2963,7 @@
 
   addEventListener("keydown", e => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab") return;
-    if (e.target.closest && e.target.closest("#vol, #panel, #controls")) return;
+    if (e.target.closest && e.target.closest("#vol, #panel, #controls, #emo, #slap")) return;
     // Shift must return before the pop-a-random-cell fallback below, or simply
     // holding it to run would machine-gun the sheet
     if (e.key === "Shift") { running = true; return; }
@@ -2528,7 +2979,9 @@
     audio();
     const live = cells.filter(c => c.st === 0);
     if (!live.length) return;
-    popCell(live[(Math.random() * live.length) | 0], performance.now());
+    const c = live[(Math.random() * live.length) | 0];
+    popCell(c, performance.now());
+    netEvent({ t: "p", i: c.idx });
   });
 
   addEventListener("keyup", e => {
@@ -2574,11 +3027,12 @@
   // step through the map instead of walking it
   function teleport(i) {
     const w = walker;
+    if (w.duet) endDuet(w.duet);
     w.x = zoneStart(i) + zoneW / 2;
-    w.y = H / 2;
+    w.y = VH / 2;
     w.vx = w.vy = w.kx = w.ky = 0;
     w.hop = w.hopV = 0;
-    cam.x = Math.min(Math.max(w.x - W / 2, 0), Math.max(0, worldW - W));   // snap, don't scroll the world
+    cam.x = Math.min(Math.max(w.x - viewW / 2, 0), Math.max(0, worldW - viewW));   // snap, don't scroll the world
     enterZone(i);
     rings.push({ x: w.x, y: w.y, t: performance.now(), life: 520, big: true });
   }
@@ -2628,7 +3082,6 @@
     store.set("walk", on ? "1" : "0");
     walkEl.setAttribute("aria-pressed", String(on));
     walkEl.textContent = on ? "On" : "Off";
-    stickEl.hidden = !on;
     if (!on) { held.clear(); steer(); stick.dx = stick.dy = 0; }
   }
   walkEl.addEventListener("click", () => { audio(); setWalker(!walker.on); });
@@ -2644,14 +3097,18 @@
   addEventListener("pointerdown", () => { if (!panelEl.hidden) openPanel(false); });
   addEventListener("keydown", e => { if (e.key === "Escape" && !panelEl.hidden) openPanel(false); });
 
-  document.getElementById("npcDown").addEventListener("click", () => {
-    npcWant = Math.max(0, (npcWant < 0 ? 0 : npcWant) - 1);
-    store.set("npc", npcWant); fitNpcs();
-  });
-  document.getElementById("npcUp").addEventListener("click", () => {
-    npcWant = Math.min(NPC_MAX, (npcWant < 0 ? 0 : npcWant) + 1);
-    store.set("npc", npcWant); fitNpcs();
-  });
+  /* ── emotes ─────────────────────────────────────────── */
+
+  const emoEl = document.getElementById("emo");
+  for (const e of EMO) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = e;
+    b.setAttribute("aria-label", "Say " + e);
+    b.addEventListener("click", () => { audio(); emote(e); });
+    b.addEventListener("pointerdown", ev => ev.stopPropagation());
+    emoEl.appendChild(b);
+  }
 
   function setMusic(on) {
     musicOn = on;

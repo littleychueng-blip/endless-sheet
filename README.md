@@ -70,6 +70,37 @@ browser loaded. Change the message format and a friend who hasn't reloaded is
 speaking the old dialect — tell people to hard reload after a multiplayer
 change.
 
+## How everyone sees the same world
+
+The world has a fixed size in its own units — `S = 56`, `VH = 1000` — and the
+camera scales it to fit the height of whatever screen it lands on. That is the
+whole trick. The grid, the zones and the bridges come out identical on a phone
+and on a laptop, so cell #1006 is the same bubble everywhere and a position can
+travel over the wire as a plain pair of numbers.
+
+Because the world is identical, clients only ever have to agree on **events**,
+never on state:
+
+- each player's position, twelve times a second
+- the wanderers, from whichever client is **host** — the lowest id in the room.
+  Everyone else plays those positions back. The host changes on its own when
+  someone leaves.
+- one short message per bang: a tap, a collision, a slap, an emote
+
+Nobody sends the sheet. A cell pops under a peer's feet on your machine because
+you are running the same footsteps they are. Two rules keep that honest, and
+both are easy to break by accident:
+
+- **cells refill on a schedule baked into the cell** (`wait` is derived from the
+  cell's index, not `Math.random()`), or two screens would regrow at different
+  times
+- **the whole sheet keeps its clock, on or off screen.** The draw loop advances
+  every cell's state and only *draws* the visible ones. Put the visibility check
+  back in front of the state machine and a cell a friend popped three zones away
+  freezes mid-pop until you walk up to it.
+
+Level, XP and wardrobe stay local — those are yours, not the room's.
+
 ## Where it runs
 
 Google Cloud VM, Coolify v4, project `endless-sheet` / production. Build pack
