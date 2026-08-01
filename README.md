@@ -139,6 +139,31 @@ record at `35.202.38.29`, set it as the domain in Coolify, and a certificate
 is issued automatically. Adding to the home screen still gives a fullscreen
 app over http — that comes from the meta tags, not the protocol.
 
+## Buzzing an iPhone
+
+Android answers `navigator.vibrate`. Safari mostly does not — Apple never
+shipped the Vibration API, so for most of this game's life every buzz was
+silently doing nothing on iOS.
+
+What Safari does have is the switch control added in 17.4, which ticks the
+phone's haptic engine when it toggles. Clicking a hidden `<label>` for one is
+the only way a page can reach that engine. So `buzz()` asks for both and takes
+whatever the phone gives it. Three things about it are load-bearing:
+
+- **the switch has to stay rendered.** `display:none` or `visibility:hidden`
+  and Safari stops ticking it, which is why `#hap` is a 1px transparent corner
+  instead.
+- **the click must go through the `<label>`.** Clicking the input directly
+  does nothing.
+- **it is a side effect, not an API.** It works on iOS 17.4 through 26.4 and
+  Apple closed it in 26.5. If a newer iPhone stays silent, that's why, and
+  there is no other route from a web page.
+
+`buzz()` also throttles to one every 70ms and only fires for pops *you* caused.
+The wanderers pop about three cells a second between them just by walking
+around, and a phone that ticks three times a second while you stand still
+reads as broken.
+
 ## No external requests
 
 Every sound is synthesised in Web Audio at the moment it plays, every sprite

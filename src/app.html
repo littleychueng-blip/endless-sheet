@@ -410,6 +410,21 @@
   }
   #toast.show { opacity: 1; transform: translate(-50%, -16px); }
 
+  /* The haptic switch has to stay rendered to keep ticking — display:none or
+     visibility:hidden and Safari stops making it buzz. So it's parked in a
+     1px corner instead, out of the way of everything including the pointer. */
+  #hap {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+  }
+
   /* ── emote rail ───────────────────────────────────────── */
   #emo {
     position: fixed;
@@ -1368,6 +1383,59 @@
     enterZone(nearestZone(walker.x));        // keeps the readout honest after a resize
   }
 
+  /* ══ haptics ═════════════════════════════════════════════
+     Android answers navigator.vibrate and always has. iPhones mostly do not —
+     Safari never shipped the Vibration API, so every buzz in this file was
+     quietly doing nothing on iOS. What Safari does have is the switch control
+     added in 17.4, which ticks the phone's haptic engine when it toggles;
+     clicking a hidden <label> for one is the only way a page can reach that
+     engine. It's a side effect rather than an API — it works from iOS 17.4 to
+     26.4 and Apple closed it in 26.5 — so this asks for both and takes
+     whatever the phone is willing to give. */
+
+  const SWITCHY = (() => {
+    try { return "switch" in document.createElement("input"); } catch (e) { return false; }
+  })();
+  let hapEl = null, hapAt = 0;
+
+  function tickHaptic() {
+    if (!SWITCHY) return;
+    if (!hapEl) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.setAttribute("switch", "");
+      box.id = "hapbox";
+      box.tabIndex = -1;
+      const lab = document.createElement("label");
+      lab.htmlFor = "hapbox";
+      const host = document.createElement("div");
+      host.id = "hap";
+      host.setAttribute("aria-hidden", "true");
+      host.append(box, lab);
+      document.body.appendChild(host);
+      hapEl = lab;
+    }
+    // the toggle is the buzz, and it only counts through the label
+    try { hapEl.click(); } catch (e) {}
+  }
+
+  // A buzz answers something you did. The wanderers pop about three cells a
+  // second between them just by walking around, and a phone that ticks three
+  // times a second forever while you stand still reads as broken — so their
+  // pops score and sound, they just don't reach your hand.
+  let handsOn = true;
+
+  // every buzz in the game comes through here. `beats` is how many ticks it's
+  // worth on a phone that can only do one strength.
+  function buzz(pattern, beats) {
+    const now = performance.now();
+    if (now - hapAt < 70) return;            // a slap pops hundreds of cells at once
+    hapAt = now;
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+    tickHaptic();
+    for (let i = 1; i < (beats || 1); i++) setTimeout(tickHaptic, i * 70);
+  }
+
   /* ══ pops ════════════════════════════════════════════════ */
 
   const POP_MS = reduced ? 90 : 170;
@@ -1479,7 +1547,7 @@
       store.set("pops", pops); store.set("exp", exp); store.set("slap", slapCharge);
       paintSlap();
     }
-    if (navigator.vibrate) navigator.vibrate(P.shape === "cap" ? 6 : 10);
+    if (handsOn) buzz(P.shape === "cap" ? 6 : 10);
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
@@ -1712,7 +1780,9 @@
     if (Math.abs(n.vx) > S * 0.2) n.face += ((n.vx > 0 ? 1 : -1) - n.face) * Math.min(1, dt * 7);
     tick(n, dt, mag);
 
-    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) trample(n, now, S * 0.46, false, true);
+    if (mag > 0.05 || Math.hypot(n.kx, n.ky) > S) {
+      handsOn = false; trample(n, now, S * 0.46, false, true); handsOn = true;
+    }
   }
 
   // Everyone but the host is watching a recording: slide the wanderer toward
@@ -1730,7 +1800,7 @@
     n.face += (n.rface - n.face) * Math.min(1, dt * 7);
     n.z = nearestZone(n.x);
     tick(n, dt, n.moving ? 0.6 : 0);
-    if (n.moving) trample(n, now, S * 0.46, false, true);
+    if (n.moving) { handsOn = false; trample(n, now, S * 0.46, false, true); handsOn = true; }
   }
 
   // a collision is a small event: shove them two bodies apart, then blow
@@ -1752,7 +1822,7 @@
     boom((x - cam.x) * k);
     if (mine === false) return;
     addXp(25);                               // a collision is worth more than the cells it clears
-    if (navigator.vibrate) navigator.vibrate([12, 24, 18]);
+    buzz([12, 24, 18], 2);
   }
 
   /* ══ the slap ════════════════════════════════════════════
@@ -1856,7 +1926,7 @@
       c.kx += ux * S * 5 * fall;
       c.ky += uy * S * 3 * fall;
     }
-    if (slapFx.mine && navigator.vibrate) navigator.vibrate([30, 40, 60]);
+    if (slapFx.mine) buzz([30, 40, 60], 3);
   }
 
   /* The hand is drawn once into its own canvas and stamped from there. It has
@@ -2592,8 +2662,9 @@
     rings.push({ x: b.x, y: b.y, t: now, life: 620, big: true });
     if (!reduced) shake = Math.max(shake, 0.8);
     clang((b.x - cam.x) * k);
-    if (!b.remote) toast("Locked up — lost by " + margin);
+    if (!b.remote) { buzz([25, 60, 25, 60, 25], 3); toast("Locked up — lost by " + margin); }
     else if (mine) toast("Won by " + margin + " — " + (b.name || "they") + " is in");
+
   }
 
   // a cage dropping onto stone
