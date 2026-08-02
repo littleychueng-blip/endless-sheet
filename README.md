@@ -139,6 +139,25 @@ record at `35.202.38.29`, set it as the domain in Coolify, and a certificate
 is issued automatically. Adding to the home screen still gives a fullscreen
 app over http — that comes from the meta tags, not the protocol.
 
+## Weather
+
+One minute per turn — clear, rain, thunder or snow — and **nobody is told which
+turn it is**. The sky is a pure function of the wall clock: every client hashes
+`Math.floor(Date.now() / 60000)` and gets the same answer. That means it also
+comes out right for somebody who joins halfway through, and it survives the
+host leaving, neither of which a broadcast would give you for free. Phone
+clocks drift by a second or two; all that costs is starting the rain a moment
+apart, which nobody can see.
+
+10% of minutes are instead a downpour of people, who fall, hit the floor and
+vanish.
+
+The turn is shared. **What falls out of it is not**: raindrops, snowflakes and
+the falling crowd are generated per screen and never sent, because they change
+nothing — no cell is popped by any of them. That's the line to keep if you add
+to this. Anything that touches a cell has to be derived from something every
+client already agrees on, or the worlds come apart.
+
 ## Buzzing an iPhone
 
 Android answers `navigator.vibrate`. Safari mostly does not — Apple never

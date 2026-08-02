@@ -429,6 +429,47 @@
   }
   #toast.show { opacity: 1; transform: translate(-50%, -16px); }
 
+  /* ── the stick ────────────────────────────────────────── */
+  #stick {
+    position: fixed;
+    left: 20px;
+    bottom: calc(env(safe-area-inset-bottom) + 108px);
+    z-index: 3;
+    width: 118px;
+    height: 118px;
+    border-radius: 50%;
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    display: grid;
+    place-items: center;
+    touch-action: none;
+    cursor: grab;
+    transition: border-color 180ms ease;
+  }
+  #stick[hidden] { display: none; }
+  #stick.gripped { cursor: grabbing; border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
+  #stick::after {
+    content: "";
+    position: absolute;
+    inset: 15px;
+    border-radius: 50%;
+    border: 1px dashed color-mix(in oklab, var(--ink) 14%, transparent);
+  }
+
+  #knob {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: color-mix(in oklab, var(--accent) 82%, var(--surface-2));
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+    box-shadow: var(--shadow);
+    transition: transform 200ms cubic-bezier(.2,1.5,.4,1), background 500ms ease;
+    will-change: transform;
+  }
+  #stick.gripped #knob { transition: background 500ms ease; }
+
   /* The haptic switch has to stay rendered to keep ticking — display:none or
      visibility:hidden and Safari stops making it buzz. So it's parked in a
      1px corner instead, out of the way of everything including the pointer. */
@@ -657,6 +698,7 @@
     #vol label { display: none; }
     #gear { padding: 9px 11px; font-size: 0; letter-spacing: 0; gap: 0; }
     #gear svg { width: 15px; height: 15px; }
+    #stick { left: 16px; width: 108px; height: 108px; }
     #emo { right: 16px; bottom: calc(env(safe-area-inset-bottom) + 186px); gap: 6px; }
     #emo button { width: 42px; height: 42px; font-size: 20px; }
     #panel { left: 14px; right: 14px; width: auto; }
@@ -665,10 +707,10 @@
 </style>
 
 <div id="wash"></div>
-<canvas id="sheet" aria-label="Sheet of bubbles. Tap, drag, or press any key to pop." role="img"></canvas>
+<canvas id="sheet" aria-label="Sheet of bubbles. Tap or swipe to pop, or press any key." role="img"></canvas>
 <div id="scrim"></div>
 
-<div id="hint"><span>Drag anywhere to walk. Tap to pop. Head right for the bridge.</span></div>
+<div id="hint"><span>Stick to walk. Swipe the sheet to cut through it. Head right for the bridge.</span></div>
 
 <div id="hud">
   <div id="mark" class="mono">Endless&nbsp;Sheet</div>
@@ -747,6 +789,8 @@
     <p id="joinnote" class="mono">Anyone with the link joins the same world.</p>
   </form>
 </div>
+
+<div id="stick" aria-hidden="true"><div id="knob"></div></div>
 
 <div id="emo" role="group" aria-label="Emotes"></div>
 
@@ -949,16 +993,37 @@
 
   const panTo = x => (pans.length && x >= 0) ? pans[Math.round(Math.min(1, x / W) * 8)] : master;
 
-  function play(x, id) {
+  // the weight of a foot, laid under the pop. `w` runs 0 to 1 with speed.
+  function crush(t, r, w) {
+    tone(t, { from: 96 * r, to: 52 * r, sweep: 0.07, gain: 0.16 + 0.2 * w, a: 0.002, d: 0.08 + 0.05 * w });
+    burst(t, { type: "lowpass", freq: 240 + 300 * w, q: 1.2, gain: 0.1 + 0.16 * w, d: 0.05 + 0.04 * w });
+    // grit, only when you're really moving
+    if (w > 0.5) burst(t + 0.006, { type: "bandpass", freq: 3200 * r, q: 2, gain: 0.06 * w, d: 0.02 });
+  }
+
+  /* Every cell used to sound like every other cell, because the only thing
+     that varied was one random number per hit. Two things fix that. A cell's
+     pitch is now a property of the cell — the same bubble always answers the
+     same way, and the one beside it answers slightly differently, which is
+     what makes walking across a patch sound like walking across a patch
+     rather than a loop. And a foot is not a fingertip: a stomp adds weight
+     under the pop that scales with how fast you were going. */
+
+  function play(x, id, cell, heavy) {
     if (!ac) return;
     if (ac.state === "suspended") ac.resume();
     // queue rapid hits a few ms apart so a fast drag reads as a roll, not mush
     const t = Math.max(ac.currentTime + 0.001, lastVoice + 0.014);
     lastVoice = t;
+    // the cell's own pitch, with a little jitter so it never sounds sampled
+    const own = cell ? ((cell.idx * 2654435761 >>> 0) % 1000) / 1000 : Math.random();
+    const r = 0.9 + own * 0.2 + (Math.random() - 0.5) * 0.03;
+
     // pops fire from inside the draw loop — a bad voice must never stop the frame
     try {
       out = panTo(x);
-      VOICES[id || pack.id](t, 0.92 + Math.random() * 0.17);
+      VOICES[id || pack.id](t, r);
+      if (heavy) crush(t, r, heavy);
     } catch (e) {
       if (!play.warned) { play.warned = true; console.error("voice failed", e); }
     }
@@ -1004,6 +1069,74 @@
       tone(t, { from: 165, to: 40, sweep: 0.2, gain: 0.8, a: 0.005, d: 0.34 });
       burst(t, { type: "lowpass", freq: 800, q: 1, gain: 0.55, d: 0.13 });
       burst(t, { type: "bandpass", freq: 2600, q: 2, gain: 0.3, d: 0.05 });
+    } catch (e) { /* silence beats a dead render loop */ }
+    out = master;
+  }
+
+  /* ══ the sound of weather ════════════════════════════════
+     A bed that runs under everything while the sky is busy, plus two one-shot
+     bangs. The bed is filtered noise on a loop — rain is the top end of it,
+     snow is the bottom, which is most of what tells them apart with your eyes
+     shut. */
+
+  let bed = null, bedKind = null;
+
+  function stopBed() {
+    if (!bed) return;
+    const dead = bed;
+    bed = null;
+    try {
+      dead.g.gain.setTargetAtTime(0, ac.currentTime, 0.35);
+      setTimeout(() => { try { dead.src.stop(); } catch (e) {} }, 1800);
+    } catch (e) {}
+  }
+
+  function weatherBed() {
+    if (!ac || bedKind === sky.kind) return;
+    bedKind = sky.kind;
+    stopBed();
+    const level = sky.kind === "thunder" ? 0.15
+      : sky.kind === "rain" ? 0.11
+      : sky.kind === "snow" ? 0.05 : 0;
+    if (!level) return;
+    try {
+      const src = noise();
+      src.loop = true;
+      const wet = sky.kind === "snow";
+      const f = filt(wet ? "lowpass" : "highpass", wet ? 380 : 850, 0.7);
+      const g2 = ac.createGain();
+      g2.gain.value = 0;
+      src.connect(f); f.connect(g2); g2.connect(master);
+      src.start();
+      g2.gain.setTargetAtTime(level, ac.currentTime, 1.4);   // it arrives, it doesn't cut in
+      bed = { src, g: g2 };
+    } catch (e) { bed = null; }
+  }
+
+  function thunder() {
+    if (!ac) return;
+    try {
+      out = master;
+      const t = ac.currentTime + 0.001;
+      crack(t, { type: "lowpass", freq: 320, q: 0.8, gain: 1.05, knee: 0.5, d: 0.5 });
+      tone(t, { from: 58, to: 26, sweep: 0.9, gain: 0.8, a: 0.01, d: 1.6 });
+      burst(t + 0.12, { type: "lowpass", freq: 520, q: 1, gain: 0.5, d: 1.2 });
+      burst(t + 0.55, { type: "lowpass", freq: 300, q: 1, gain: 0.3, d: 1.4 });   // the roll after
+    } catch (e) { /* silence beats a dead render loop */ }
+    out = master;
+  }
+
+  // a body meeting the floor. Smaller ones land higher.
+  function thud(x, scale) {
+    if (!ac) return;
+    try {
+      out = panTo(x);
+      const t = Math.max(ac.currentTime + 0.001, lastVoice + 0.01);
+      lastVoice = t;
+      const r = 0.8 + (1 - scale) * 0.55;
+      tone(t, { from: 132 * r, to: 44 * r, sweep: 0.09, gain: 0.5, a: 0.002, d: 0.17 });
+      burst(t, { type: "lowpass", freq: 430, q: 1, gain: 0.3, d: 0.09 });
+      burst(t + 0.01, { type: "bandpass", freq: 1800 * r, q: 2, gain: 0.12, d: 0.03 });
     } catch (e) { /* silence beats a dead render loop */ }
     out = master;
   }
@@ -1146,7 +1279,7 @@
     scale: 1, belt: true, cool: 0
   };
   // not a widget any more — just where the finger went down and how far it's pulled
-  const stick = { dx: 0, dy: 0, id: null, ox: 0, oy: 0, moved: false };
+  const stick = { dx: 0, dy: 0, id: null };
   const keyVec = { x: 0, y: 0 };
   let running = false;                       // Shift, or the stick pushed to the rim
 
@@ -1553,7 +1686,7 @@
     const P = PACKS[c.z];                     // a cell sounds like the zone it belongs to
     c.st = 1; c.t = now;
     burstFx(c.x, c.y, P);
-    play((c.x - cam.x) * k, P.id);            // panned by where it is on screen
+    play((c.x - cam.x) * k, P.id, c, stompW);   // panned by where it is, weighted by what hit it
     if (mine === false) return;
     pops++;
     if (duel && duel.me) duel.me.duelPops++;  // ten seconds, and this is the score
@@ -1593,7 +1726,146 @@
     if (!hinted) { hinted = true; document.getElementById("hint").classList.add("gone"); }
   }
 
-  /* ══ the walker and the wanderers ════════════════════════ */
+  /* ══ weather ═════════════════════════════════════════════
+     One minute per turn, and nobody has to be told which turn it is: the sky
+     is a pure function of the wall clock. Everybody hashes the same minute
+     number and gets the same answer, which means it also comes out right for
+     somebody who joins halfway through, and it survives the host leaving.
+     Clocks drift by a second or two between phones — all that costs is
+     starting the rain a moment apart, which nobody can see.
+
+     Rain, snow and the falling crowd are drawn per screen and never sent.
+     They're weather, not world: nothing they do changes a cell. */
+
+  const SPELL_MS = 60000;
+  const SKIES = ["clear", "rain", "thunder", "snow"];
+  const FALL_CHANCE = 0.10;
+
+  // one number in, one number out, same on every machine
+  function hash32(n) {
+    n = (n ^ 61) ^ (n >>> 16);
+    n = (n + (n << 3)) >>> 0;
+    n = n ^ (n >>> 4);
+    n = Math.imul(n, 0x27d4eb2d) >>> 0;
+    return (n ^ (n >>> 15)) >>> 0;
+  }
+
+  function spellAt(minute) {
+    const h = hash32(minute);
+    // the falling crowd takes the whole minute when it comes up
+    if ((hash32(minute ^ 0x9e37) % 1000) / 1000 < FALL_CHANCE) return { sky: "clear", fall: true };
+    return { sky: SKIES[h % SKIES.length], fall: false };
+  }
+
+  const sky = { kind: "clear", fall: false, minute: -1, bolt: 0, nextBolt: 0, nextDrop: 0, seq: 0 };
+  const drops = [];                          // rain streaks or snowflakes
+  const fallers = [];                        // people, briefly
+
+  function stepSky(now) {
+    const minute = Math.floor(Date.now() / SPELL_MS);
+    if (minute !== sky.minute) {
+      const s = spellAt(minute);
+      const first = sky.minute < 0;
+      sky.minute = minute;
+      sky.kind = s.sky;
+      sky.fall = s.fall;
+      sky.seq = 0;
+      sky.nextBolt = now + 1500 + Math.random() * 6000;
+      sky.nextDrop = now;
+      drops.length = 0;
+      weatherBed();
+      if (!first) toast(s.fall ? "It's raining people" : {
+        clear: "The sky clears", rain: "Rain", thunder: "Thunder", snow: "Snow"
+      }[s.sky]);
+    }
+
+    const rain = sky.kind === "rain" || sky.kind === "thunder";
+    const snow = sky.kind === "snow";
+
+    if (!reduced && (rain || snow)) {
+      const want = rain ? (sky.kind === "thunder" ? 150 : 110) : 90;
+      while (drops.length < want) drops.push(newDrop(rain, true));
+    }
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      d.x += d.vx; d.y += d.vy;
+      if (d.snow) d.x += Math.sin((now + d.seed) / 700) * 0.6;
+      if (d.y > VH + S) {
+        if (rain || snow) drops[i] = newDrop(rain, false);
+        else drops.splice(i, 1);
+        if (rain && !reduced && Math.random() < 0.5) {   // a splash where it lands
+          rings.push({ x: d.x, y: VH - Math.random() * 4, t: now, life: 260, c: "#8FB6D8" });
+        }
+      }
+    }
+
+    if (sky.kind === "thunder" && now > sky.nextBolt) {
+      sky.nextBolt = now + 3000 + Math.random() * 9000;
+      sky.bolt = now;
+      thunder();
+      if (!reduced) shake = Math.max(shake, 0.5);
+    }
+
+    if (sky.fall) stepFallers(now);
+    else if (fallers.length) fallers.length = 0;
+  }
+
+  function newDrop(rain, anywhere) {
+    const x = cam.x - S * 2 + Math.random() * (viewW + S * 6);
+    return rain
+      ? { x, y: anywhere ? Math.random() * VH : -S * (1 + Math.random() * 3),
+          vx: 4.5, vy: 34 + Math.random() * 16, len: S * (0.5 + Math.random() * 0.4), snow: 0 }
+      : { x, y: anywhere ? Math.random() * VH : -S * (1 + Math.random() * 2),
+          vx: 0.5, vy: 2.4 + Math.random() * 2.6, r: S * (0.035 + Math.random() * 0.05),
+          seed: Math.random() * 6000, snow: 1 };
+  }
+
+  /* The crowd falls where you're looking, hits the floor, and is gone. It
+     leaves a dent and a bang and nothing else — no cell is popped and nothing
+     is sent, so two players watching the same minute see the same downpour
+     without either of them having to agree on where a single body landed. */
+  function stepFallers(now) {
+    if (!reduced && now > sky.nextDrop) {
+      sky.nextDrop = now + 34 + Math.random() * 46;
+      fallers.push({
+        x: cam.x - S + Math.random() * (viewW + S * 2),
+        y: -S * (2 + Math.random() * 6),
+        gy: VH * (0.15 + Math.random() * 0.8),
+        v: S * (3 + Math.random() * 3),
+        spin: (Math.random() - 0.5) * 6,
+        turn: (Math.random() - 0.5) * 9,
+        scale: 0.62 + Math.random() * 0.3
+      });
+    }
+    for (let i = fallers.length - 1; i >= 0; i--) {
+      const f = fallers[i];
+      f.v += S * 26 * 0.016;
+      f.y += f.v * 0.016;
+      f.spin += f.turn * 0.016;
+      if (f.y < f.gy) continue;
+      fallers.splice(i, 1);
+      splat(f, now);
+    }
+  }
+
+  function splat(f, now) {
+    rings.push({ x: f.x, y: f.gy, t: now, life: 340, stomp: true });
+    dents.push({ x: f.x, y: f.gy, t: now, life: 620 });
+    if (dents.length > 40) dents.shift();
+    if (Math.abs(f.x - (cam.x + viewW / 2)) < viewW * 0.6) {
+      thud((f.x - cam.x) * k, f.scale);
+      if (!reduced) shake = Math.max(shake, 0.35);
+    }
+    if (reduced) return;
+    for (let i = 0; i < 8; i++) {
+      const a = -Math.random() * Math.PI, sp = 1 + Math.random() * 2.6;
+      parts.push({
+        x: f.x, y: f.gy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        r: 1.4 + Math.random() * 2.2, life: 320 + Math.random() * 260,
+        t: now, c: darkNow ? "#8E8CA0" : "#9C9AAE", soft: true
+      });
+    }
+  }
 
   const npcs = [];
   let shake = 0, flash = null;
@@ -1648,14 +1920,19 @@
     }
   }
 
+  // how hard the pop being played right now is being stood on: 0 is a fingertip
+  let stompW = 0;
+
   function trample(c, now, reach, heavy, mine) {
     const r2 = reach * reach;
+    stompW = heavy ? Math.min(1, Math.hypot(c.vx, c.vy) / (S * 4)) : 0;
     for (const cell of cells) {
       if (cell.st !== 0) continue;
       if ((cell.x - c.x) ** 2 + (cell.y - c.y) ** 2 >= r2) continue;
       popCell(cell, now, mine);
       if (heavy) stompFx(cell, c);
     }
+    stompW = 0;
   }
 
   // A stomp should land harder than a tap: the cell throws its shards along
@@ -2126,20 +2403,35 @@
     return true;
   }
 
+  const esc = s => String(s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  // A headcount tells you how many; a room tells you who. Names, yours first
+  // and in bold, and a tail count once there are more than four of you.
   function paintOnline() {
     const el = document.getElementById("online");
     const n = document.getElementById("onlineN");
     if (!el || !n) return;
-    const here = net.peers.size + 1;
-    const live = net.state === "on";
-    el.classList.toggle("live", live);
+    el.classList.toggle("live", net.state === "on");
     el.classList.toggle("bad", net.state === "error" || net.state === "full");
-    n.innerHTML =
-      net.state === "on" ? "<b>" + here + "</b> here"
-      : net.state === "connecting" ? "connecting…"
-      : net.state === "full" ? "room full"
-      : net.state === "error" ? "reconnecting…"
-      : "solo";
+
+    if (net.state !== "on") {
+      n.innerHTML =
+        net.state === "connecting" ? "connecting…"
+        : net.state === "full" ? "room full"
+        : net.state === "error" ? "reconnecting…"
+        : esc(net.name || "solo");
+      return;
+    }
+
+    const others = [];
+    for (const [, p] of net.peers) if (p.name) others.push(p.name);
+    others.sort();
+    const shown = others.slice(0, 4).map(esc);
+    const rest = others.length - shown.length;
+    n.innerHTML = "<b>" + esc(net.name || "you") + "</b>"
+      + (shown.length ? " · " + shown.join(" · ") : "")
+      + (rest > 0 ? " +" + rest : "");
   }
 
   function netConnect(name) {
@@ -2198,7 +2490,10 @@
 
     if (m.t === "s") {
       const p = net.peers.get(m.id) || newPeer(m.id);
-      p.name = String(m.n || "").slice(0, 14);
+      const named = String(m.n || "").slice(0, 14);
+      // a peer exists before it has a name — the roster only reads right once
+      // the first state message brings one, so repaint when it lands
+      if (named !== p.name) { p.name = named; paintOnline(); }
       if (m.l) p.look = { body: m.l[0], hat: m.l[1], eyes: m.l[2] };
       p.tx = +m.x; p.ty = +m.y;                        // same world, same numbers
       p.thop = +m.h || 0;
@@ -2953,6 +3248,103 @@
     }
   }
 
+  /* ══ drawing the sky ═════════════════════════════════════ */
+
+  function drawSky(now) {
+    const x0 = cam.x - S, w = viewW + S * 2;
+    const rain = sky.kind === "rain" || sky.kind === "thunder";
+
+    // the light each sky leaves you standing in
+    if (rain || sky.kind === "snow") {
+      const tint = rain ? (darkNow ? "#0A0E18" : "#4E627E") : (darkNow ? "#0C1018" : "#B9CADC");
+      g.fillStyle = rgba(tint, sky.kind === "thunder" ? 0.3 : rain ? 0.22 : 0.17);
+      g.fillRect(x0, 0, w, VH);
+    } else {
+      const sun = g.createRadialGradient(x0 + w * 0.2, -VH * 0.25, 0, x0 + w * 0.2, -VH * 0.25, VH * 1.4);
+      sun.addColorStop(0, rgba("#FFD49A", darkNow ? 0.05 : 0.11));
+      sun.addColorStop(1, rgba("#FFD49A", 0));
+      g.fillStyle = sun;
+      g.fillRect(x0, 0, w, VH);
+    }
+
+    if (!reduced && drops.length) {
+      if (rain) {
+        // two passes: a wide soft streak with a bright thread down the middle,
+        // because one thin line at this scale disappears into the bubbles
+        g.lineCap = "round";
+        g.beginPath();                          // every streak in one path
+        for (const d of drops) {
+          if (d.x < x0 || d.x > x0 + w) continue;
+          g.moveTo(d.x, d.y);
+          g.lineTo(d.x - d.vx * 0.6, d.y - d.len);
+        }
+        g.strokeStyle = rgba(darkNow ? "#BBD8F4" : "#2E5B8C", 0.34);
+        g.lineWidth = Math.max(2, S * 0.075);
+        g.stroke();
+        g.strokeStyle = rgba(darkNow ? "#EAF4FF" : "#DCEBFA", 0.8);
+        g.lineWidth = Math.max(1, S * 0.028);
+        g.stroke();
+      } else {
+        g.fillStyle = rgba("#FFFFFF", darkNow ? 0.72 : 0.92);
+        for (const d of drops) {
+          if (d.x < x0 || d.x > x0 + w) continue;
+          g.beginPath();
+          g.arc(d.x, d.y, d.r, 0, 6.2832);
+          g.fill();
+        }
+      }
+    }
+
+    if (sky.bolt) {                             // two strikes, close together
+      const e = now - sky.bolt;
+      if (e > 260) sky.bolt = 0;
+      else if (e < 70 || (e > 130 && e < 190)) {
+        g.fillStyle = rgba("#FFFFFF", darkNow ? 0.45 : 0.62);
+        g.fillRect(x0, 0, w, VH);
+      }
+    }
+  }
+
+  // people, mid-fall: arms out, spinning, with the ground coming up at them
+  function drawFallers() {
+    if (!fallers.length) return;
+    const skin = darkNow ? "#F2F1F8" : "#22222E";
+    const face = darkNow ? "#22222E" : "#F2F1F8";
+    for (const f of fallers) {
+      if (f.x < cam.x - S * 2 || f.x > cam.x + viewW + S * 2) continue;
+      const u = S * 0.55 * f.scale;
+
+      const close = Math.max(0, Math.min(1, 1 - (f.gy - f.y) / (VH * 0.6)));
+      g.fillStyle = rgba("#000000", (darkNow ? 0.34 : 0.17) * close);
+      g.beginPath();
+      g.ellipse(f.x, f.gy, u * (0.3 + close * 0.36), u * (0.08 + close * 0.09), 0, 0, 6.2832);
+      g.fill();
+
+      g.save();
+      g.translate(f.x, f.y);
+      g.rotate(f.spin);
+      g.fillStyle = skin;
+      for (const s of [-1, 1]) {                // arms and legs, thrown out
+        g.beginPath();
+        g.ellipse(s * u * 0.86, -u * 0.1 + Math.sin(f.spin * 2 + s) * u * 0.2,
+          u * 0.13, u * 0.2, s * 0.5, 0, 6.2832);
+        g.fill();
+        g.beginPath();
+        g.ellipse(s * u * 0.34, u * 0.95, u * 0.2, u * 0.13, 0, 0, 6.2832);
+        g.fill();
+      }
+      rr(g, -u * 0.72, -u * 0.8, u * 1.44, u * 1.6, u * 0.5);
+      g.fill();
+      g.fillStyle = face;                       // wide eyes, understandably
+      for (const s of [-1, 1]) {
+        g.beginPath();
+        g.ellipse(s * u * 0.26, -u * 0.18, u * 0.13, u * 0.16, 0, 0, 6.2832);
+        g.fill();
+      }
+      g.restore();
+    }
+  }
+
   /* ══ bridges ═════════════════════════════════════════════ */
 
   // Wood palette shared by both passes
@@ -3110,6 +3502,7 @@
     stepSlap(now);
     stepWaves(now);
     stepDuel(now);
+    stepSky(now);
     netSend(false);
     if (hosting) netNpcs();
 
@@ -3264,6 +3657,9 @@
       }
     }
 
+    drawSky(now);                             // weather sits in front of the world
+    drawFallers();
+
     // last, so it covers everything: you don't see the shockwave through a hand
     drawSlap(now);
 
@@ -3273,50 +3669,72 @@
 
   /* ══ input ═══════════════════════════════════════════════ */
 
-  /* There is no joystick any more. Put a finger down anywhere and drag: the
-     point you touched becomes the centre and the character walks the way you
-     pull. Let go without dragging and it was a tap, so that still pops the
-     bubble you meant to pop. */
+  /* The stick drives, and anywhere else on the sheet is a blade: drag across
+     the bubbles and they burst under your finger. Two jobs, two places, so
+     neither has to guess what the other meant. */
 
   let hinted = false;
-  const REACH = 78;                        // screen pixels from the touch to full tilt
-  const SLOP = 11;                         // and how far you can wander before it's a drag
+  const down = new Set();
 
   cvs.addEventListener("pointerdown", e => {
     audio();
     if (ac.state === "suspended") ac.resume();
-    if (stick.id !== null) return;         // one finger drives; the rest are ignored
-    stick.id = e.pointerId;
-    stick.ox = e.clientX; stick.oy = e.clientY;
-    stick.moved = false;
-    cvs.setPointerCapture(e.pointerId);
-    if (!walker.on) hit(e.clientX, e.clientY);
+    down.add(e.pointerId);
+    // pop first: capture is a nicety and it can throw if the finger is already
+    // gone, and losing the tap you actually made is the worse failure
+    hit(e.clientX, e.clientY);
+    try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
   });
 
   cvs.addEventListener("pointermove", e => {
-    if (stick.id !== e.pointerId) return;
-    if (!walker.on) {                      // no character: a drag is a pop trail again
-      const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-      for (const p of pts) hit(p.clientX, p.clientY);
-      return;
-    }
-    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
-    if (!stick.moved && Math.hypot(dx, dy) < SLOP) return;   // still could be a tap
-    stick.moved = true;
-    dx /= REACH; dy /= REACH;
-    const m = Math.hypot(dx, dy);
-    if (m > 1) { dx /= m; dy /= m; }
-    stick.dx = dx; stick.dy = dy;
+    if (!down.has(e.pointerId)) return;
+    // every point the finger passed through, not just where it ended up — a
+    // fast swipe should leave a clean cut, not a dotted line. The list comes
+    // back empty for events that didn't come from a real finger, so fall back
+    // to the event itself rather than cutting nothing.
+    let pts = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (!pts || !pts.length) pts = [e];
+    for (const p of pts) hit(p.clientX, p.clientY);
   });
 
-  const release = e => {
-    if (stick.id !== e.pointerId) return;
-    if (walker.on && !stick.moved) hit(stick.ox, stick.oy);
-    stick.id = null; stick.dx = stick.dy = 0; stick.moved = false;
-  };
+  const release = e => { down.delete(e.pointerId); };
   cvs.addEventListener("pointerup", release);
   cvs.addEventListener("pointercancel", release);
   cvs.addEventListener("contextmenu", e => e.preventDefault());
+
+  /* joystick */
+  const stickEl = document.getElementById("stick");
+  const knobEl = document.getElementById("knob");
+
+  function aim(e) {
+    const b = stickEl.getBoundingClientRect();
+    const reach = b.width / 2 - 22;
+    let dx = (e.clientX - (b.left + b.width / 2)) / reach;
+    let dy = (e.clientY - (b.top + b.height / 2)) / reach;
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    if (m < 0.14) { dx = dy = 0; }                     // dead zone
+    stick.dx = dx; stick.dy = dy;
+    knobEl.style.transform = `translate(${dx * reach}px, ${dy * reach}px)`;
+  }
+
+  stickEl.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    audio();
+    stick.id = e.pointerId;
+    try { stickEl.setPointerCapture(e.pointerId); } catch (err) {}
+    stickEl.classList.add("gripped");
+    aim(e);
+  });
+  stickEl.addEventListener("pointermove", e => { if (stick.id === e.pointerId) aim(e); });
+  const drop = e => {
+    if (stick.id !== e.pointerId) return;
+    stick.id = null; stick.dx = stick.dy = 0;
+    stickEl.classList.remove("gripped");
+    knobEl.style.transform = "translate(0px, 0px)";
+  };
+  stickEl.addEventListener("pointerup", drop);
+  stickEl.addEventListener("pointercancel", drop);
 
   /* keys: arrows and WASD steer, everything else pops —
      which is the whole joke of the switch packs */
@@ -3455,6 +3873,7 @@
     store.set("walk", on ? "1" : "0");
     walkEl.setAttribute("aria-pressed", String(on));
     walkEl.textContent = on ? "On" : "Off";
+    stickEl.hidden = !on;                    // nothing to steer, nothing to steer it with
     if (!on) { held.clear(); steer(); stick.dx = stick.dy = 0; }
   }
   walkEl.addEventListener("click", () => { audio(); setWalker(!walker.on); });
