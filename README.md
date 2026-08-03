@@ -169,9 +169,15 @@ cosmetic and per-player (positions are host-synced; looks are yours). Bumping
 one plays its cry through the same panner rack as everything else.
 
 There is also a hidden guest: pin yourself against the **bottom edge** of a
-zone and keep pushing down for **five seconds**. Do it again to undo it. The
-image is a data URI baked into the page at build time — the no-external-requests
-rule holds.
+zone and keep pushing down for **five seconds**. Do it again to undo it. One
+wanderer becomes her, five times the size, and she follows you around instead
+of ambling. The image is a data URI baked into the page at build time — the
+no-external-requests rule holds.
+
+She is deliberately kept out of the world's bookkeeping: the egg is local, so
+she is steered locally (she is following *you*, after all), she never tramples
+a cell, and nothing collides with her. A body that big popping cells only on
+one screen is exactly the divergence the rest of this file is built to avoid.
 
 ## Buzzing an iPhone
 
