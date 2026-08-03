@@ -149,14 +149,29 @@ host leaving, neither of which a broadcast would give you for free. Phone
 clocks drift by a second or two; all that costs is starting the rain a moment
 apart, which nobody can see.
 
-10% of minutes are instead a downpour of people, who fall, hit the floor and
-vanish.
+10% of minutes are instead a downpour of people, who fall, hit the floor,
+blow up the cells under them and vanish.
 
-The turn is shared. **What falls out of it is not**: raindrops, snowflakes and
-the falling crowd are generated per screen and never sent, because they change
-nothing — no cell is popped by any of them. That's the line to keep if you add
-to this. Anything that touches a cell has to be derived from something every
-client already agrees on, or the worlds come apart.
+The turn is shared, and so is the crowd: the falling minute is **scripted from
+the seed** — every client unrolls the same list of bodies landing in the same
+places at the same offsets into the minute, which is what lets a landing pop
+cells without the worlds coming apart. Landings score for nobody (`mine` stays
+false throughout), and the bang is only drawn and heard by whoever is looking.
+Raindrops and snowflakes remain per-screen, because they touch nothing.
+
+That's the line to keep if you add to this: anything that touches a cell has to
+be derived from something every client already agrees on.
+
+## The wanderers
+
+The five wanderers are pets — cat, dog or dinosaur, picked in Setup, purely
+cosmetic and per-player (positions are host-synced; looks are yours). Bumping
+one plays its cry through the same panner rack as everything else.
+
+There is also a hidden guest: pin yourself against the **bottom edge** of a
+zone and keep pushing down for **five seconds**. Do it again to undo it. The
+image is a data URI baked into the page at build time — the no-external-requests
+rule holds.
 
 ## Buzzing an iPhone
 
