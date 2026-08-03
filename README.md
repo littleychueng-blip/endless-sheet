@@ -168,16 +168,34 @@ The five wanderers are pets — cat, dog or dinosaur, picked in Setup, purely
 cosmetic and per-player (positions are host-synced; looks are yours). Bumping
 one plays its cry through the same panner rack as everything else.
 
+Push one hard enough at the rim and it goes over the edge: a solid hit stuns
+it, and a stunned body keeps its momentum instead of steering out of trouble,
+so it sails past the boundary, tumbles away and a new one wanders in. The
+host's `y` travels in the snapshot exactly as before, so everyone watches the
+same body leave — only the tumble is drawn locally.
+
 There is also a hidden guest: pin yourself against the **bottom edge** of a
-zone and keep pushing down for **five seconds**. Do it again to undo it. One
-wanderer becomes her, five times the size, and she follows you around instead
-of ambling. The image is a data URI baked into the page at build time — the
+zone and keep pushing down for **five seconds**. Do it again to undo it. Every
+wanderer becomes her at three times the size, following you around instead of
+ambling. The image is a data URI baked into the page at build time — the
 no-external-requests rule holds.
 
-She is deliberately kept out of the world's bookkeeping: the egg is local, so
-she is steered locally (she is following *you*, after all), she never tramples
-a cell, and nothing collides with her. A body that big popping cells only on
-one screen is exactly the divergence the rest of this file is built to avoid.
+She is deliberately kept off the sheet: the egg is local, so she is steered
+locally (she is following *you*, after all) and she never tramples a cell. A
+body that big popping cells on one screen only is exactly the divergence the
+rest of this file is built to avoid. She still collides like anything else —
+her standoff distance is wider than the collision radius, so she keeps out of
+your way until you walk into her.
+
+## Sound
+
+Every voice is modelled on what the real object does, and the master bus is
+deliberately almost idle: **-9dB, 3:1, 8ms attack**. The old settings (-14dB,
+8:1, 2ms) were a limiter in all but name, and since a pop is *all* transient it
+flattened every one of them — the sounds came out processed rather than
+snapped. Voices now peak around 0.33-0.49 so the compressor only catches the
+loudest moments and the attacks pass through untouched. If you add a voice,
+keep it in that range rather than turning it up.
 
 ## Buzzing an iPhone
 
