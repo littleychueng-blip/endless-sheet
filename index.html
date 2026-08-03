@@ -1077,29 +1077,45 @@
     out = master;
   }
 
-  /* what a bumped pet says about it */
+  /* What a bumped pet says about it. These have to live above the bang that
+     causes them: a collision is a low boom plus a dozen pops, so anything
+     down where the boom is gets swallowed whole. Every voice here sits in the
+     mid and top of the band, and the caller delays it past the transient — you
+     hear the crash, then the complaint. */
   const CRIES = {
     cat(t) {          // mee, then ow
-      tone(t, { wave: "triangle", from: 620, to: 980, sweep: 0.12, gain: 0.34, a: 0.02, d: 0.16 });
-      tone(t + 0.14, { wave: "triangle", from: 930, to: 420, sweep: 0.2, gain: 0.3, a: 0.012, d: 0.22 });
-      burst(t, { type: "bandpass", freq: 2400, q: 3, gain: 0.05, d: 0.2 });
+      tone(t, { wave: "triangle", from: 660, to: 1020, sweep: 0.11, gain: 0.55, a: 0.018, d: 0.16 });
+      tone(t + 0.13, { wave: "triangle", from: 980, to: 470, sweep: 0.2, gain: 0.5, a: 0.012, d: 0.24 });
+      tone(t + 0.005, { wave: "sine", from: 1320, to: 2040, sweep: 0.11, gain: 0.12, a: 0.02, d: 0.14 });
+      burst(t, { type: "bandpass", freq: 2600, q: 3, gain: 0.08, d: 0.2 });
     },
     dog(t) {          // one round woof
-      burst(t, { type: "lowpass", freq: 640, q: 1, gain: 0.5, d: 0.07 });
-      tone(t, { wave: "sawtooth", from: 240, to: 110, sweep: 0.09, gain: 0.4, a: 0.004, d: 0.12 });
-      tone(t + 0.015, { wave: "triangle", from: 460, to: 190, sweep: 0.07, gain: 0.2, a: 0.004, d: 0.09 });
+      burst(t, { type: "bandpass", freq: 900, q: 1.2, gain: 0.5, d: 0.08 });
+      tone(t, { wave: "sawtooth", from: 340, to: 165, sweep: 0.1, gain: 0.6, a: 0.004, d: 0.14 });
+      tone(t + 0.012, { wave: "triangle", from: 680, to: 300, sweep: 0.08, gain: 0.34, a: 0.004, d: 0.11 });
+      burst(t + 0.004, { type: "bandpass", freq: 2700, q: 2.4, gain: 0.12, d: 0.05 });
     },
     dino(t) {         // a small monster doing its best
-      tone(t, { wave: "sawtooth", from: 300, to: 120, sweep: 0.3, gain: 0.28, a: 0.01, d: 0.34 });
-      tone(t + 0.02, { wave: "sawtooth", from: 150, to: 70, sweep: 0.3, gain: 0.22, a: 0.01, d: 0.3 });
-      burst(t, { type: "bandpass", freq: 520, q: 2, gain: 0.16, d: 0.3 });
-      tone(t + 0.3, { wave: "triangle", from: 520, to: 860, sweep: 0.08, gain: 0.15, a: 0.01, d: 0.1 });
+      tone(t, { wave: "sawtooth", from: 420, to: 175, sweep: 0.28, gain: 0.5, a: 0.012, d: 0.34 });
+      tone(t + 0.02, { wave: "sawtooth", from: 230, to: 105, sweep: 0.28, gain: 0.3, a: 0.012, d: 0.3 });
+      burst(t, { type: "bandpass", freq: 1100, q: 2, gain: 0.22, d: 0.3 });
+      tone(t + 0.3, { wave: "triangle", from: 600, to: 980, sweep: 0.09, gain: 0.28, a: 0.012, d: 0.12 });
     }
   };
 
-  function cry(x) {
+  /* `wait` buys distance from whatever caused the cry. A collision doesn't
+     make one sound, it queues a train of them — thirty cells at fourteen
+     milliseconds apart is the better part of half a second of popping — so a
+     fixed delay lands the cry in the middle of the train and the train eats
+     it. Riding lastVoice puts it just after whatever is already queued,
+     however big the bang was. */
+  function cry(x, wait) {
     if (!ac) return;
-    try { out = panTo(x); CRIES[pet](ac.currentTime + 0.001); } catch (e) {}
+    if (ac.state === "suspended") ac.resume();
+    const t = Math.min(Math.max(ac.currentTime + (wait || 0.001), lastVoice + 0.05),
+                       ac.currentTime + 0.6);      // …but never so late it reads as unrelated
+    lastVoice = t;
+    try { out = panTo(x); CRIES[pet](t); } catch (e) {}
     out = master;
   }
 
@@ -2654,7 +2670,7 @@
 
     if (m.t === "b") {                                 // somebody walked into somebody
       blast(+m.x, +m.y, performance.now(), false);
-      if (m.i != null) cry((+m.x - cam.x) * k);        // their bump, our pet's voice
+      if (m.i != null) cry((+m.x - cam.x) * k, 0.22);  // their bump, our pet's voice
       if (isHost() && m.i != null && npcs[m.i]) {      // the shove they felt, applied where it counts
         const n = npcs[m.i];
         const d = Math.hypot(n.x - m.x, n.y - m.y) || 1;
@@ -2806,7 +2822,7 @@
         n.cool = 0.9;
         const bx = (n.x + w.x) / 2, by = (n.y + w.y) / 2;
         blast(bx, by, now, true);
-        cry((n.x - cam.x) * k);
+        cry((n.x - cam.x) * k, 0.22);         // after the bang, not under it
         // the index rides along so the host can shove the same wanderer
         netEvent({ t: "b", x: Math.round(bx), y: Math.round(by), i });
       }
