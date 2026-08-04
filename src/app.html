@@ -2229,7 +2229,7 @@
   function drift(n, now, dt) {
     n.vx = n.kx; n.vy = n.ky;
     n.x += n.vx * dt; n.y += n.vy * dt;
-    n.x = Math.min(Math.max(n.x, S * 0.44), worldW - S * 0.44);
+    n.x = Math.min(Math.max(n.x, -S * 0.2), worldW + S * 0.2);
     n.z = nearestZone(n.x);
     n.moving = 1;
     if (Math.abs(n.vx) > S * 0.2) n.face += ((n.vx > 0 ? 1 : -1) - n.face) * Math.min(1, dt * 7);
@@ -2237,15 +2237,32 @@
   }
 
   // over the rim: the bottom, the top, or either end of the strip
+  /* "Off the map" is not four hardcoded edges — it's anywhere there is no
+     floor. A zone is solid from top to bottom; the gap between two zones is
+     empty except the width of the bridge deck. So the void either side of a
+     bridge, above and below the planks, counts exactly like the top and the
+     bottom of the world does, and asking the world where its ground is gets
+     all of them at once. `m` is how far inside the edge still counts, so the
+     tumble starts while you can still see it. */
+  function onGround(x, y, m) {
+    if (x < m || x > worldW - m) return false;
+    if (y < m || y > VH - m) return false;
+    if (zoneAt(x) >= 0) return true;                   // a zone is floor all the way down
+    const b = BAND() - m;                              // a bridge is only its deck
+    return y > VH / 2 - b && y < VH / 2 + b;
+  }
+
   function overboard(n, now) {
-    if (n.gone) return false;
-    // A body inside the rim, so the whole tumble happens on screen. The world
-    // is exactly one screen tall — there is no "below" to fall into — so the
-    // fall has to read as distance, and that only works if you can see it.
-    const down = n.y > VH - S * 1.3 ? 1 : n.y < S * 1.3 ? -1 : 0;
-    const side = n.x < S * 1.2 ? -1 : n.x > worldW - S * 1.2 ? 1 : 0;
-    if (!shoved(n) || (!down && !side)) return false;
-    n.gone = { t0: now, dir: down || 1, side, spin: (Math.random() - 0.5) * 9 };
+    if (n.gone || !shoved(n) || onGround(n.x, n.y, S * 1.1)) return false;
+    // in a gap or off an end it keeps drifting the way it was thrown; over the
+    // top or bottom of a zone there's nowhere sideways to go
+    const loose = zoneAt(n.x) < 0 || n.x < S || n.x > worldW - S;
+    n.gone = {
+      t0: now,
+      dir: n.y < VH / 2 ? -1 : 1,                      // whichever way it left
+      side: loose ? (n.kx >= 0 ? 1 : -1) : 0,
+      spin: (Math.random() - 0.5) * 9
+    };
     n.moving = 0;
     if (Math.abs(n.x - (cam.x + viewW / 2)) < viewW) wail((n.x - cam.x) * k);
     return true;
@@ -2260,9 +2277,9 @@
       return;
     }
     // it leaves the picture, but only just: the rest of the fall is scale
-    n.y += n.gone.dir * S * 2.4 * dt;
-    n.x += n.gone.side * S * 1.6 * dt + n.kx * dt * 0.4;
-    n.y = Math.min(Math.max(n.y, -S * 0.15), VH + S * 0.15);   // stays in shot
+    n.y += (n.gone.side ? S * 1.4 : n.gone.dir * S * 2.4) * dt;   // sideways still sinks
+    n.x += n.gone.side * S * 1.2 * dt + n.kx * dt * 0.4;
+    n.y = Math.min(Math.max(n.y, -S * 0.15), VH + S * 0.15);      // stays in shot
     n.x = Math.min(Math.max(n.x, -S * 0.15), worldW + S * 0.15);
   }
 
@@ -2277,8 +2294,10 @@
     n.vx = dx / d * speed + n.kx;
     n.vy = dy / d * speed + n.ky;
     n.x += n.vx * dt; n.y += n.vy * dt;
-    n.x = Math.min(Math.max(n.x, S * 0.44), worldW - S * 0.44);
-    if (!shoved(n)) n.y = Math.min(Math.max(n.y, S * 0.44), VH - S * 0.44);
+    if (!shoved(n)) {
+      n.x = Math.min(Math.max(n.x, S * 0.44), worldW - S * 0.44);
+      n.y = Math.min(Math.max(n.y, S * 0.44), VH - S * 0.44);
+    }
     n.z = nearestZone(n.x);
     n.moving = Math.abs(pull) > 0.06 ? 1 : 0;
     if (Math.abs(n.vx) > S * 0.2) n.face += ((n.vx > 0 ? 1 : -1) - n.face) * Math.min(1, dt * 7);
@@ -2305,12 +2324,14 @@
     n.vx = n.hx * speed + n.kx; n.vy = n.hy * speed + n.ky;
     n.x += n.vx * dt; n.y += n.vy * dt;
 
-    // wanderers keep to their own zone — they never cross a bridge
+    // Wanderers keep to their own zone under their own steam — but a hard
+    // shove overrides every one of these walls, sideways included, or you
+    // could never push one into the gap beside a bridge.
     const pad = S * 0.5;
-    const lo = zoneStart(n.z) + pad, hi = zoneEnd(n.z) - pad;
-    if (n.x < lo) { n.x = lo; n.tx = n.hx = Math.abs(n.hx) + 0.2; }
-    if (n.x > hi) { n.x = hi; n.tx = n.hx = -Math.abs(n.hx) - 0.2; }
-    if (!shoved(n)) {                                   // a hard shove carries them over
+    if (!shoved(n)) {
+      const lo = zoneStart(n.z) + pad, hi = zoneEnd(n.z) - pad;
+      if (n.x < lo) { n.x = lo; n.tx = n.hx = Math.abs(n.hx) + 0.2; }
+      if (n.x > hi) { n.x = hi; n.tx = n.hx = -Math.abs(n.hx) - 0.2; }
       if (n.y < pad) { n.y = pad; n.ty = n.hy = Math.abs(n.hy) + 0.2; }
       if (n.y > VH - pad) { n.y = VH - pad; n.ty = n.hy = -Math.abs(n.hy) - 0.2; }
     }

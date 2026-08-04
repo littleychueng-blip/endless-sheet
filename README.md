@@ -168,9 +168,21 @@ The five wanderers are pets — cat, dog or dinosaur, picked in Setup, purely
 cosmetic and per-player (positions are host-synced; looks are yours). Bumping
 one plays its cry through the same panner rack as everything else.
 
-Push one hard enough at the rim and it goes over the edge: a solid hit stuns
-it, and a stunned body keeps its momentum instead of steering out of trouble,
-so it sails past the boundary, tumbles away and a new one wanders in. The
+Push one hard enough and it goes over the edge: a solid hit stuns it, and a
+stunned body keeps its momentum instead of steering out of trouble, so it
+sails past the boundary, tumbles away and a new one wanders in.
+
+"Off the map" is not four hardcoded edges — it's **anywhere there is no
+floor**, which `onGround(x, y, m)` answers in one place. A zone is solid top to
+bottom; the gap between two zones is empty *except* the width of the bridge
+deck. So the void either side of a bridge, above and below the planks, counts
+exactly like the top and bottom of the world, and so do both ends of the
+strip. Add a new kind of ground and this is the only function to teach.
+
+The rim check fires a body's width *inside* the boundary on purpose. The world
+is exactly one screen tall, so anything that keeps falling past the bottom is
+gone before you can see it — the fall reads as distance instead, shrinking and
+spinning away over 1.3s while the position stays in shot. The
 host's `y` travels in the snapshot exactly as before, so everyone watches the
 same body leave — only the tumble is drawn locally.
 
